@@ -1,0 +1,378 @@
+@import "tailwindcss";
+
+/*
+  CareerLens design system
+  ------------------------
+  Neutral, near-black surfaces rather than blue-tinted slate: greys that carry
+  no hue read as more considered and let the one accent actually mean
+  something. The primary action is white on black — the highest-contrast,
+  least-decorated button available, and unmistakably the main thing to press.
+
+  Corner radius is deliberately restrained: 8px on cards, 6px on controls.
+  Large radii read as consumer-app friendly; tighter corners read as a tool.
+*/
+
+@theme inline {
+  --font-sans: var(--font-inter);
+
+  --radius-card: 0.5rem;
+  --radius-control: 0.375rem;
+}
+
+:root {
+  /* Surfaces, darkest to lightest */
+  --bg: #0a0a0a;
+  --surface: #131313;
+  --surface-raised: #1a1a1a;
+  --border: #262626;
+  --border-strong: #383838;
+
+  /* Text */
+  --text: #fafafa;
+  --text-muted: #a3a3a3;
+  --text-subtle: #737373;
+
+  /* One accent, used sparingly for state and emphasis */
+  --accent: #6366f1;
+  --accent-soft: rgba(99, 102, 241, 0.14);
+
+  /* Semantic */
+  --positive: #34d399;
+  --warning: #fbbf24;
+  --negative: #fb7185;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4d4d4d;
+}
+
+/* Focus is always visible — never removed, only restyled. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+  background-size: 200% 100%;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.gradient-text {
+  background: linear-gradient(100deg, #fafafa 10%, #a5b4fc 55%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glass {
+  background: rgba(19, 19, 19, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+/* --- Components -------------------------------------------------------- */
+
+.card {
+  @apply bg-neutral-900 border border-neutral-800 rounded-lg p-6;
+}
+
+.card-hover {
+  @apply transition-colors duration-200 hover:border-neutral-700;
+}
+
+/* White on black: the single strongest action on any screen. */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 bg-white text-neutral-950 font-medium px-5 py-2.5 rounded-md
+         transition-all duration-200 hover:bg-neutral-200 active:scale-[0.99]
+         disabled:opacity-40 disabled:pointer-events-none;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 bg-neutral-900 text-neutral-100 font-medium px-5 py-2.5 rounded-md
+         border border-neutral-700 transition-all duration-200
+         hover:bg-neutral-800 hover:border-neutral-600 active:scale-[0.99]
+         disabled:opacity-40 disabled:pointer-events-none;
+}
+
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 text-neutral-400 font-medium px-4 py-2 rounded-md
+         transition-colors duration-200 hover:text-neutral-100 hover:bg-neutral-900;
+}
+
+.btn-danger {
+  @apply inline-flex items-center justify-center gap-2 bg-rose-500/10 text-rose-300 font-medium px-5 py-2.5 rounded-md
+         border border-rose-500/30 transition-all duration-200 hover:bg-rose-500/20;
+}
+
+.btn-small {
+  @apply text-sm px-3 py-1.5 rounded-md font-medium transition-colors;
+}
+
+.input-premium {
+  @apply w-full px-3.5 py-2.5 bg-neutral-900 border border-neutral-700 rounded-md text-neutral-100
+         placeholder:text-neutral-500 transition-colors duration-200
+         focus:outline-none focus:border-neutral-500;
+}
+
+.label {
+  @apply block text-sm font-medium text-neutral-300 mb-2;
+}
+
+/* Small status/metadata pill. */
+.chip {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium
+         bg-neutral-800 text-neutral-300 border border-neutral-700;
+}
+
+.chip-accent {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium
+         bg-indigo-500/10 text-indigo-300 border border-indigo-500/30;
+}
+
+.chip-positive {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium
+         bg-emerald-500/10 text-emerald-300 border border-emerald-500/30;
+}
+
+.chip-negative {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium
+         bg-rose-500/10 text-rose-300 border border-rose-500/30;
+}
+
+/* Section heading used above content groups. */
+.eyebrow {
+  @apply text-xs font-semibold text-neutral-500 uppercase tracking-wider;
+}
+
+.sidebar-item {
+  @apply flex items-center gap-3 px-3 py-2 text-sm text-neutral-400 rounded-md
+         transition-colors duration-150 hover:text-neutral-100 hover:bg-neutral-900;
+}
+
+.sidebar-item-active {
+  @apply flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md
+         bg-neutral-900 text-neutral-50 border border-neutral-800;
+}
+
+/* Thin divider that fades at both ends. */
+.rule {
+  @apply h-px w-full;
+  background: linear-gradient(90deg, transparent, var(--border) 15%, var(--border) 85%, transparent);
+}
+
+/* --- Editing a live posting -------------------------------------------- */
+/*
+  Amending something already published is a different act from creating it,
+  and it needs a colour that means "pending" rather than "active". The indigo
+  accent already means active/selected, so an unsaved amendment gets its own
+  hue: a gold that reads as an editorial proof mark, not an error.
+*/
+
+:root {
+  --draft: #d9a441;
+  --draft-soft: rgba(217, 164, 65, 0.12);
+  --draft-border: rgba(217, 164, 65, 0.32);
+
+  /* Diff values are data, so they are set in the changelog vernacular. */
+  --font-ledger: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+.chip-draft {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium;
+  background: var(--draft-soft);
+  color: var(--draft);
+  border: 1px solid var(--draft-border);
+}
+
+/* The revision ledger: a live diff of published vs draft. */
+.ledger {
+  font-family: var(--font-ledger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ledger-field {
+  @apply text-neutral-500 uppercase tracking-wider;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.ledger-old {
+  color: var(--text-subtle);
+  text-decoration: line-through;
+  text-decoration-color: rgba(163, 163, 163, 0.45);
+}
+
+.ledger-new {
+  color: var(--draft);
+}
+
+/*
+  The comparison card. Two faces of one object: what candidates see now, and
+  what you are about to publish. `preserve-3d` is what makes the flip a
+  rotation in space rather than a crossfade, so it must survive on both the
+  scene and the rotating element.
+*/
+.flip-scene {
+  perspective: 1400px;
+}
+
+.flip-card {
+  position: relative;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-face-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+}
+
+/* Fields animate in from behind the card plane; start hidden so the
+   staggered reveal has somewhere to travel from. */
+.field-stagger {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No entrance animation runs, so the fields must simply be visible. */
+  .field-stagger {
+    opacity: 1;
+  }
+  .flip-card {
+    transition: none !important;
+  }
+}
+
+/* --- Type scale ---------------------------------------------------------
+  The app had no scale: 33 of its headings were `text-base`, the same 16px as
+  body copy, so every page rendered as one flat grey block with no way to tell
+  a page title from a field label. These four steps are the whole hierarchy —
+  used consistently they do more for legibility than any amount of colour.
+
+  The ratio is deliberately wide at the top (30px page title against 16px
+  body) because these are dense, data-heavy screens: without a decisive jump
+  the title disappears into the table below it.
+*/
+
+.page-title {
+  @apply text-[1.875rem] leading-[1.2] font-semibold tracking-[-0.02em] text-neutral-50;
+}
+
+.page-subtitle {
+  @apply text-[0.9375rem] text-neutral-400 mt-1.5;
+}
+
+/* Groups content within a page. Sits between page title and body. */
+.section-title {
+  @apply text-[1.0625rem] leading-snug font-semibold text-neutral-100;
+}
+
+/* The name of a single thing: a job in a list, a card heading. */
+.item-title {
+  @apply text-[0.9375rem] font-medium text-neutral-100;
+}
+
+/* Supporting metadata: dates, counts, locations. Never the main content. */
+.meta {
+  @apply text-[0.8125rem] text-neutral-500;
+}
+
+.body-text {
+  @apply text-[0.9375rem] leading-relaxed text-neutral-300;
+}
+
+/* Standard page header block: title, optional subtitle, optional actions. */
+.page-header {
+  @apply flex flex-wrap items-start justify-between gap-4 mb-7;
+}
+
+/* A number that is the point of its card. Tabular so columns of them align. */
+.stat-value {
+  @apply text-[1.75rem] font-semibold text-neutral-50 tabular-nums leading-none;
+}
+
+.stat-label {
+  @apply text-[0.75rem] font-medium text-neutral-500 uppercase tracking-wider;
+}
+
+/* Table styling that matches the card surfaces rather than fighting them. */
+.data-table {
+  @apply w-full text-left;
+}
+
+.data-table th {
+  @apply text-[0.75rem] font-medium text-neutral-500 uppercase tracking-wider px-4 py-3
+         border-b border-neutral-800;
+}
+
+.data-table td {
+  @apply px-4 py-3.5 border-b border-neutral-800/70 text-[0.9375rem] text-neutral-300;
+}
+
+.data-table tbody tr:last-child td {
+  @apply border-b-0;
+}
+
+.data-table tbody tr {
+  @apply transition-colors hover:bg-neutral-800/40;
+}
+
+/* Empty states are an invitation to act, not an apology. */
+.empty-state {
+  @apply rounded-lg border border-dashed border-neutral-800 p-10 text-center;
+}

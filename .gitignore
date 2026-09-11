@@ -1,0 +1,54 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.venv-*
+
+# Secrets and local configuration.
+# .env holds the database URL and API keys and must never be committed.
+# .env.example is the checked-in template and is deliberately not ignored.
+.env
+.env.*
+!.env.example
+
+# Locally generated JWT signing key (development only).
+.secret_key
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded user content
+uploads/
+
+# Test and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Editor
+.vscode/
+.idea/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+e2e-test.db
+.e2e-uploads/
