@@ -15,14 +15,41 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", str(BASE_DIR / "uploads" / "images")))
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{BASE_DIR / 'dev.db'}"
+
+
+def _normalise_database_url(url: str) -> str:
+    """Point a bare PostgreSQL URL at the installed psycopg (v3) driver.
+
+    Hosts such as Render hand out postgres:// or postgresql:// URLs. SQLAlchemy
+    maps both to psycopg2, which is not installed, so the API would crash on
+    boot with ModuleNotFoundError instead of connecting.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+DATABASE_URL = _normalise_database_url((os.getenv("DATABASE_URL") or "").strip())
+
+# PostgreSQL is the only supported database, in every environment. There is
+# deliberately no local fallback: a silent SQLite file hid schema and
+# constraint differences that only surfaced against the real database.
+if not DATABASE_URL.startswith("postgresql+"):
+    raise RuntimeError(
+        "DATABASE_URL must be set to a PostgreSQL URL, e.g. "
+        "postgresql://user:password@localhost:5432/ai_job_intelligence. "
+        "SQLite and other databases are not supported."
+    )
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # Browser origins allowed to call this API. Comma-separated. These were
 # hardcoded to port 3000, which silently broke the app on any other port --
 # the browser blocks the request and the UI shows only "Failed to fetch".
+# A trailing slash is dropped: browsers send the Origin header without one, so
+# "https://app.vercel.app/" would never match.
 CORS_ORIGINS = [
-    origin.strip()
+    origin.strip().rstrip("/")
     for origin in os.getenv(
         "CORS_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
@@ -36,12 +63,6 @@ IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 # "development" | "production". Controls how strictly secrets are enforced.
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
-
-if IS_PRODUCTION and not DATABASE_URL.startswith(("postgresql://", "postgresql+")):
-    raise RuntimeError(
-        "DATABASE_URL must use PostgreSQL when APP_ENV=production. "
-        "Set it to a postgresql:// or postgresql+psycopg:// URL."
-    )
 
 # Values that must never be accepted as a signing key. The first was the
 # hardcoded placeholder shipped in the source, so any token minted with it

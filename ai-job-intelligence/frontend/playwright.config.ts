@@ -9,9 +9,17 @@ import { defineConfig, devices } from "@playwright/test";
  * build` accepted it, and every backend test passed. Only a real browser
  * catches that class of bug, and the same is true of hydration mismatches.
  *
- * Both servers are started automatically. The API runs against a throwaway
- * SQLite database so a test run never touches development data.
+ * Both servers are started automatically. The API runs against the PostgreSQL
+ * database named by E2E_DATABASE_URL, which must be reserved for end-to-end
+ * runs so a test never touches development data.
  */
+const E2E_DATABASE_URL = process.env.E2E_DATABASE_URL;
+if (!E2E_DATABASE_URL) {
+  throw new Error(
+    "Set E2E_DATABASE_URL to a PostgreSQL database reserved for end-to-end tests.",
+  );
+}
+
 const API_PORT = 8111;
 
 // Tests talk to the API directly for setup (creating accounts), so they need
@@ -46,9 +54,9 @@ export default defineConfig({
       command: `.venv/bin/python -m uvicorn ai_job_intelligence.main:app --port ${API_PORT}`,
       cwd: "..",
       env: {
-        // A fresh SQLite file per run keeps the developer's Postgres and
-        // uploads directory completely untouched.
-        DATABASE_URL: "sqlite:///./e2e-test.db",
+        // A dedicated database and uploads directory keep the developer's
+        // own data completely untouched.
+        DATABASE_URL: E2E_DATABASE_URL,
         // The test frontend runs on its own port, which the browser's CORS
         // check would otherwise reject.
         CORS_ORIGINS: `http://127.0.0.1:${WEB_PORT},http://localhost:${WEB_PORT}`,

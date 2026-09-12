@@ -1,16 +1,66 @@
 """Shared fixtures.
 
-The app is booted once per test session against a throwaway SQLite database so
-the configured PostgreSQL instance is never touched.
+The suite runs against PostgreSQL, inside a throwaway schema created here and
+dropped when the session ends, so the tables and rows the developer actually
+uses are never touched. The server is TEST_DATABASE_URL if set, otherwise
+DATABASE_URL (from the environment or .env). The role needs permission to
+create schemas in that database.
 """
 from __future__ import annotations
 
 import importlib
 import os
+import re
 import sys
+import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import psycopg
 import pytest
+from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+
+# The suite expects development behaviour (demo seeding, relaxed rate limits).
+# Pin it before any test module imports config, so a local .env with
+# APP_ENV=production cannot leak in: load_dotenv never overrides a variable
+# that is already set.
+os.environ["APP_ENV"] = "development"
+load_dotenv()
+
+_server_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or ""
+if not re.match(r"^postgres(ql)?(\+\w+)?://", _server_url):
+    pytest.exit(
+        "The test suite needs PostgreSQL: set TEST_DATABASE_URL (or "
+        "DATABASE_URL) to a postgresql:// URL.",
+        returncode=2,
+    )
+
+# libpq wants a plain postgresql:// URL; SQLAlchemy wants the driver named.
+_libpq_url = re.sub(r"^postgres(ql)?(\+\w+)?://", "postgresql://", _server_url)
+TEST_SCHEMA = f"test_{uuid.uuid4().hex[:12]}"
+
+with psycopg.connect(_libpq_url, autocommit=True) as _conn:
+    _conn.execute(f'CREATE SCHEMA "{TEST_SCHEMA}"')
+
+# Every connection the app opens resolves unqualified table names to the
+# throwaway schema only.
+_parts = urlsplit(_libpq_url.replace("postgresql://", "postgresql+psycopg://", 1))
+_query = parse_qsl(_parts.query) + [("options", f"-csearch_path={TEST_SCHEMA}")]
+os.environ["DATABASE_URL"] = urlunsplit(_parts._replace(query=urlencode(_query)))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop the throwaway schema, even when tests failed."""
+    database = sys.modules.get("ai_job_intelligence.services.database")
+    if database is not None:
+        database.engine.dispose()
+    try:
+        with psycopg.connect(_libpq_url, autocommit=True) as conn:
+            conn.execute("SET lock_timeout = '10s'")
+            conn.execute(f'DROP SCHEMA IF EXISTS "{TEST_SCHEMA}" CASCADE')
+    except psycopg.Error as exc:
+        print(f"\nCould not drop test schema {TEST_SCHEMA}: {exc}")
+
 
 # Must satisfy services/password_policy: long enough, not a common
 # password, no long sequential or repeated runs.
@@ -19,8 +69,6 @@ TEST_PASSWORD = "orbital-kettle-parade-77"
 
 @pytest.fixture(scope="session")
 def app_module(tmp_path_factory):
-    db_path = tmp_path_factory.mktemp("db") / "test.db"
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ["GOOGLE_API_KEY"] = ""
 
     # Keep uploads out of the project's real upload directory, which holds CV
@@ -29,7 +77,8 @@ def app_module(tmp_path_factory):
     os.environ["UPLOAD_DIR"] = str(uploads)
     os.environ["IMAGES_DIR"] = str(uploads / "images")
 
-    # Re-import so the engine binds to the test DATABASE_URL.
+    # Re-import so config picks up the test upload directories and the engine
+    # binds to the throwaway schema.
     for mod in list(sys.modules):
         if mod.startswith("ai_job_intelligence"):
             del sys.modules[mod]

@@ -96,9 +96,8 @@ def _add_missing_columns(table: str, columns: list[tuple[str, str]]) -> None:
 
     Two things this has to get right on PostgreSQL:
 
-    * ``ADD COLUMN IF NOT EXISTS`` is PostgreSQL-only, so the live schema is
-      inspected instead and a plain ADD COLUMN is issued for what is missing.
-      That works on SQLite too.
+    * The live schema is inspected and a plain ADD COLUMN is issued only for
+      what is missing, so each startup reports exactly what it changed.
     * A failed statement aborts the whole transaction, so every later statement
       on that connection fails as well. Each column therefore gets its own
       transaction: a permission error on one table cannot cascade into a failed
@@ -184,8 +183,8 @@ def startup_event() -> None:
                     text(f"ALTER TABLE analyses ALTER COLUMN {column} DROP NOT NULL")
                 )
         except Exception as exc:
-            # SQLite cannot alter constraints and does not need to here, since
-            # create_all builds the table from the current model.
+            # Already nullable, or the table was just built by create_all from
+            # the current model; either way there is nothing to relax.
             logger.debug("Could not relax analyses.%s: %s", column, exc)
 
     # Note: name/role/company live on user_profiles, not users. Earlier code

@@ -40,6 +40,8 @@ node_modules/
 .next/
 out/
 next-env.d.ts
+*.tsbuildinfo
+.vercel/
 
 # Editor
 .vscode/
@@ -50,5 +52,4 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
-e2e-test.db
 .e2e-uploads/

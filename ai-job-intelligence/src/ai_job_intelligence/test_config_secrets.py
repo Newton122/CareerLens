@@ -103,3 +103,31 @@ def test_the_old_hardcoded_key_is_gone():
 
     auth = Path(__file__).parent / "services" / "auth.py"
     assert "change-this-in-production" not in auth.read_text()
+
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        # Render and Heroku-style URLs name no driver; only psycopg 3 is installed.
+        ("postgres://u:p@h:5432/db", "postgresql+psycopg://u:p@h:5432/db"),
+        ("postgresql://u:p@h/db?sslmode=require", "postgresql+psycopg://u:p@h/db?sslmode=require"),
+        # Already explicit: left alone.
+        ("postgresql+psycopg://u:p@h/db", "postgresql+psycopg://u:p@h/db"),
+    ],
+)
+def test_database_url_uses_the_installed_driver(monkeypatch, tmp_path, given, expected):
+    config = _resolve(monkeypatch, tmp_path)
+    assert config._normalise_database_url(given) == expected
+
+
+@pytest.mark.parametrize("url", ["", "sqlite:///./dev.db", "mysql://u:p@h/db"])
+def test_only_postgresql_is_accepted(monkeypatch, url):
+    """There is no SQLite fallback, in development or production."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+    monkeypatch.setenv("SECRET_KEY", _IMPORT_SAFE_KEY)
+    monkeypatch.setenv("DATABASE_URL", url)
+    for mod in list(sys.modules):
+        if mod.startswith("ai_job_intelligence.config"):
+            del sys.modules[mod]
+    with pytest.raises(RuntimeError, match="PostgreSQL"):
+        importlib.import_module("ai_job_intelligence.config")

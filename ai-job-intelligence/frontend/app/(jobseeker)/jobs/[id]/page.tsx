@@ -52,6 +52,13 @@ export default function JobDetailPage() {
         const data = await response.json();
         setJob(data);
       }
+      // Seed the toggle so an already-saved job offers "Unsave" rather than
+      // failing with "Job already saved".
+      const savedRes = await apiCall("/api/saved-jobs");
+      if (savedRes.ok) {
+        const savedJobs: { job_id: number }[] = await savedRes.json();
+        setSaved(savedJobs.some((s) => s.job_id === parseInt(jobId)));
+      }
     } catch (err) {
       setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading job", type: 'error' });
     } finally {
@@ -82,15 +89,14 @@ export default function JobDetailPage() {
 
   const handleSave = async () => {
     try {
-      const response = await apiCall(
-        `/api/saved-jobs/${jobId}`,
-        {
-          method: saved ? "DELETE" : "POST",
-          ...(saved ? {} : {
+      // The backend saves via POST /api/saved-jobs (job_id in the body) and
+      // unsaves via DELETE /api/saved-jobs/{job_id}.
+      const response = saved
+        ? await apiCall(`/api/saved-jobs/${jobId}`, { method: "DELETE" })
+        : await apiCall("/api/saved-jobs", {
+            method: "POST",
             body: JSON.stringify({ job_id: parseInt(jobId) }),
-          }),
-        },
-      );
+          });
       const data = await response.json();
       if (response.ok) {
         setSaved(!saved);

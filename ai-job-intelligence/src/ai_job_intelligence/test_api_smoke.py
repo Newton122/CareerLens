@@ -1,7 +1,7 @@
 """End-to-end smoke tests covering the startup path and every major endpoint.
 
-These run against a throwaway SQLite database so they never touch the
-configured PostgreSQL instance. Several cases pin bugs that previously broke
+These run in a throwaway PostgreSQL schema (see conftest.py) so they never
+touch the developer's real tables. Several cases pin bugs that previously broke
 the app outright -- see the comments on each.
 """
 from __future__ import annotations
