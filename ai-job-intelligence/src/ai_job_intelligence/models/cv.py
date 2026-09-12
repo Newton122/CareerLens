@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, String, Text, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from ai_job_intelligence.clock import utcnow
 from ai_job_intelligence.database import Base
 
 
@@ -15,7 +16,7 @@ class CV(Base):
     extracted_text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
+        default=utcnow,
     )
     user_id: Mapped[int] = mapped_column(
         Integer,

@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { motion } from "framer-motion";
-import { FaBriefcase, FaUsers, FaFileAlt, FaPlus, FaSearch, FaArrowRight, FaEye } from "react-icons/fa";
+import { FaBriefcase, FaUsers, FaFileAlt, FaPlus, FaArrowRight, FaEye } from "react-icons/fa";
+import type { IconType } from "react-icons";
 import MessageDialog from "@/components/MessageDialog";
 
 interface EmployerStats {
@@ -46,51 +47,54 @@ export default function EmployerDashboard() {
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const statsRes = await apiCall("/api/user/stats");
-      if (statsRes.ok) {
-        const data = await statsRes.json();
-        setStats(data);
-      }
-
-      const jobsRes = await apiCall("/api/jobs");
-      if (jobsRes.ok) {
-        const jobsData: Job[] = await jobsRes.json();
-        setJobs(jobsData.slice(0, 3));
-
-        const apps: Application[] = [];
-        for (const job of jobsData.slice(0, 3)) {
-          const appsRes = await apiCall(
-            `/api/jobs/${job.id}/applications`,
-          );
-          if (appsRes.ok) {
-            const jobApps = await appsRes.json();
-            jobApps.forEach((app: any) => {
-              apps.push({
-                id: app.id,
-                job_id: app.job_id,
-                job_title: app.job_title,
-                candidate_name: app.candidate_name,
-                status: app.status,
-                match_score: app.match_score || 0,
-              });
-            });
-          }
+    let active = true;
+    (async () => {
+      try {
+        const statsRes = await apiCall("/api/user/stats");
+        if (statsRes.ok) {
+          const data = await statsRes.json();
+          if (active) setStats(data);
         }
-        setApplications(apps.slice(0, 5));
+
+        const jobsRes = await apiCall("/api/jobs");
+        if (jobsRes.ok) {
+          const jobsData: Job[] = await jobsRes.json();
+          if (active) setJobs(jobsData.slice(0, 3));
+
+          const apps: Application[] = [];
+          for (const job of jobsData.slice(0, 3)) {
+            const appsRes = await apiCall(
+              `/api/jobs/${job.id}/applications`,
+            );
+            if (appsRes.ok) {
+              const jobApps = await appsRes.json();
+              jobApps.forEach((app: Application & { match_score: number | null }) => {
+                apps.push({
+                  id: app.id,
+                  job_id: app.job_id,
+                  job_title: app.job_title,
+                  candidate_name: app.candidate_name,
+                  status: app.status,
+                  match_score: app.match_score || 0,
+                });
+              });
+            }
+          }
+          if (active) setApplications(apps.slice(0, 5));
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading dashboard", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading dashboard", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-neutral-900">
@@ -282,7 +286,7 @@ export default function EmployerDashboard() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: any; color: string }) {
+function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: IconType; color: string }) {
   const colorClasses: Record<string, string> = {
     blue: "from-blue-500/20 to-blue-500/5 border-blue-500/20 text-blue-400",
     emerald: "from-emerald-500/20 to-emerald-500/5 border-emerald-500/20 text-emerald-400",
@@ -298,7 +302,7 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
   );
 }
 
-function QuickAction({ icon: Icon, label, onClick, color }: { icon: any; label: string; onClick: () => void; color: string }) {
+function QuickAction({ icon: Icon, label, onClick, color }: { icon: IconType; label: string; onClick: () => void; color: string }) {
   const colorClasses: Record<string, string> = {
     blue: "text-blue-400 bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20",
     emerald: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20",

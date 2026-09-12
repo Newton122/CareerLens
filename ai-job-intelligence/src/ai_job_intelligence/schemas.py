@@ -5,7 +5,7 @@ from typing import List
 
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CVAnalysisRequest(BaseModel):
@@ -134,7 +134,25 @@ class LoginRequest(BaseModel):
     def _normalise_email(cls, value: str) -> str:
         return value.strip().lower()
 
-    
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def _normalise_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=200)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=200)
+
+
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str
@@ -217,8 +235,7 @@ class JobRead(JobBase):
     skill_gaps: list[str] | None = None
     match_breakdown: dict | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ApplicationCreate(BaseModel):
@@ -236,8 +253,7 @@ class ApplicationRead(BaseModel):
     match_score: int | None = None
     applied_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SavedJobCreate(BaseModel):
@@ -256,8 +272,7 @@ class SavedJobRead(BaseModel):
     match_score: float | None = None
     required_skills: list[str] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserStats(BaseModel):
@@ -322,6 +337,8 @@ class ProfileRead(BaseModel):
     linkedin: str = ""
     twitter: str = ""
     image_url: str = ""
+    # False until the user clicks the link in their verification email.
+    email_verified: bool = False
 
 
 class ProfileUpdate(BaseModel):
@@ -486,8 +503,7 @@ class InterviewRead(BaseModel):
     notes: str | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InterviewStatusUpdate(BaseModel):
@@ -521,8 +537,7 @@ class MessageRead(BaseModel):
     read_at: datetime | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversationRead(BaseModel):

@@ -1,12 +1,21 @@
 "use client";
 
-import { API_BASE } from "@/components/api";
+import {
+  API_BASE,
+  AUTH_CHANGED_EVENT,
+  SESSION_EXPIRED_EVENT,
+  SESSION_KEYS,
+  clearStoredSession,
+  notifySessionChanged,
+} from "@/components/api";
 
 import {
   createContext,
+  useCallback,
   useContext,
-  useState,
   useEffect,
+  useState,
+  useSyncExternalStore,
   ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -33,34 +42,57 @@ export function useAuth() {
   return ctx;
 }
 
-// Single source of truth; see components/api.ts. A local copy here meant
-// sign-in ignored NEXT_PUBLIC_API_BASE and always hit port 8000.
+// ─── The login session lives in localStorage ──────────────────────────────
+//
+// localStorage is an "external store": React doesn't own it, and it doesn't
+// exist on the server, where these pages are first rendered. The tool React
+// provides for reading such a store is useSyncExternalStore. It renders the
+// server value (signed out) during hydration, then switches to the browser's
+// value with no mismatch warning -- which reading localStorage in an effect
+// and copying it into state did only by rendering twice.
+
+function subscribe(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(AUTH_CHANGED_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(AUTH_CHANGED_EVENT, onChange);
+  };
+}
+
+// A single string so React can compare snapshots cheaply (it must return an
+// identical value while nothing has changed).
+function readSession(): string {
+  return JSON.stringify(SESSION_KEYS.map((key) => localStorage.getItem(key)));
+}
+
+const SIGNED_OUT = JSON.stringify(SESSION_KEYS.map(() => null));
+
+const noSubscription = () => () => {};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [token, setToken] = useState<string | null>(null);
-  const [userId, setUserId] = useState<number | null>(null);
-  const [role, setRole] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const session = useSyncExternalStore(subscribe, readSession, () => SIGNED_OUT);
+  // False on the server and during hydration, true once in the browser:
+  // until then we cannot know whether someone is signed in.
+  const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
+  const [signingIn, setSigningIn] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  const [token, storedUserId, role, email] = JSON.parse(session) as (string | null)[];
+  const userId = token && storedUserId ? parseInt(storedUserId, 10) : null;
+
+  // Say why someone was signed out, when api.ts reports a dead session. A
+  // subscription: state is set in the event callback, not in the effect.
   useEffect(() => {
-    const t = localStorage.getItem("access_token");
-    const uid = localStorage.getItem("user_id");
-    const r = localStorage.getItem("careerLens_role");
-    const e = localStorage.getItem("user_email");
-    if (t) {
-      setToken(t);
-      if (uid) setUserId(parseInt(uid, 10));
-      if (r) setRole(r);
-      if (e) setEmail(e);
-    }
-    setLoading(false);
+    const onExpired = () =>
+      setDialog({ open: true, title: "Signed out", message: "Your session has ended. Please sign in again.", type: "info" });
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
-  const login = async (email: string, password: string) => {
-    setLoading(true);
+  const login = useCallback(async (email: string, password: string) => {
+    setSigningIn(true);
     try {
       const response = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
@@ -79,11 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("user_id", String(data.user_id));
       localStorage.setItem("careerLens_role", data.role);
       localStorage.setItem("user_email", data.email);
-
-      setToken(data.access_token);
-      setUserId(data.user_id);
-      setRole(data.role);
-      setEmail(data.email);
+      notifySessionChanged();
 
       setDialog({ open: true, title: 'Success', message: "Login successful!", type: 'success' });
 
@@ -94,33 +122,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         router.push("/dashboard");
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Network error. Please try again.", type: 'error' });
     } finally {
-      setLoading(false);
+      setSigningIn(false);
     }
-  };
+  }, [router]);
 
-  const logout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("user_id");
-    localStorage.removeItem("careerLens_role");
-    localStorage.removeItem("user_email");
-    setToken(null);
-    setUserId(null);
-    setRole(null);
-    setEmail(null);
+  const logout = useCallback(() => {
+    clearStoredSession();
     router.push("/login");
-  };
+  }, [router]);
 
   return (
     <AuthContext.Provider
       value={{
         token,
         userId,
-        role,
-        email,
-        loading,
+        role: token ? role : null,
+        email: token ? email : null,
+        loading: !hydrated || signingIn,
         login,
         logout,
         isAuthenticated: !!token,

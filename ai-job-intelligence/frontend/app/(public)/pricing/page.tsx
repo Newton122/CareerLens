@@ -9,7 +9,6 @@ import {
   FaRocket,
   FaCrown,
   FaBuilding,
-  FaQuestion,
   FaChevronDown,
 } from "react-icons/fa";
 

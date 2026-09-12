@@ -1,12 +1,14 @@
 [project]
 name = "ai-job-intelligence"
 version = "0.1.0"
-description = "Add your description here"
+description = "CareerLens API: CV analysis, job matching and hiring workflows (FastAPI + PostgreSQL)"
 readme = "README.md"
 authors = [
-    { name = "Newton122", email = "brightonmatic4.com" }
+    { name = "Newton122", email = "brightonmatic4@gmail.com" }
 ]
 requires-python = ">=3.12"
+# Runtime dependencies are pinned in requirements.in / requirements.txt,
+# which is what Render installs. Install with: pip install -r requirements.txt
 dependencies = []
 
 [project.scripts]

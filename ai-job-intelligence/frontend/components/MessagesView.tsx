@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FaPaperPlane, FaInbox, FaArrowLeft } from "react-icons/fa";
 import { apiCall } from "@/components/api";
+import { notifyMessagesRead } from "@/components/unreadMessages";
+
+// How often to look for new messages. There is no push channel yet, so the
+// view polls: the list slowly, an open conversation more often.
+const CONVERSATIONS_POLL_MS = 15_000;
+const THREAD_POLL_MS = 5_000;
 
 interface Conversation {
   user_id: number;
@@ -56,20 +62,77 @@ export default function MessagesView() {
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
-  const loadConversations = useCallback(async () => {
-    try {
-      const res = await apiCall("/api/messages");
-      if (res.ok) setConversations(await res.json());
-    } catch {
-      setError("Could not load your conversations.");
-    } finally {
-      setLoading(false);
-    }
+  // Fetches the conversation list; callers decide what to do with it.
+  const fetchConversations = useCallback(async (): Promise<Conversation[] | null> => {
+    const res = await apiCall("/api/messages");
+    return res.ok ? res.json() : null;
   }, []);
 
+  const loadConversations = async () => {
+    try {
+      const data = await fetchConversations();
+      if (data) setConversations(data);
+    } catch {
+      setError("Could not load your conversations.");
+    }
+  };
+
+  // Load now, then refresh every CONVERSATIONS_POLL_MS so new messages show up
+  // without reloading the page. There is no push channel (WebSocket) yet, so
+  // this is simple polling; it pauses while the browser tab is hidden. State
+  // is set only in the callbacks, and never after the view has gone.
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    let active = true;
+    const refresh = () => {
+      fetchConversations()
+        .then((data) => {
+          if (active && data) setConversations(data);
+        })
+        .catch(() => {
+          if (active) setError("Could not load your conversations.");
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) refresh();
+    }, CONVERSATIONS_POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [fetchConversations]);
+
+  // While a thread is open, check it for new messages more often. Only a
+  // change in the thread replaces it, so the view doesn't jump on every poll.
+  useEffect(() => {
+    if (activeId === null) return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const res = await apiCall(`/api/messages/${activeId}`);
+        if (!res.ok) return;
+        const latest: Message[] = await res.json();
+        if (!active) return;
+        setThread((current) => {
+          const same =
+            current.length === latest.length &&
+            current[current.length - 1]?.id === latest[latest.length - 1]?.id;
+          return same ? current : latest;
+        });
+        notifyMessagesRead();
+      } catch {
+        // A missed poll is harmless; the next one will try again.
+      }
+    }, THREAD_POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [activeId]);
 
   const openThread = useCallback(
     async (userId: number) => {
@@ -82,6 +145,7 @@ export default function MessagesView() {
           setConversations((prev) =>
             prev.map((c) => (c.user_id === userId ? { ...c, unread_count: 0 } : c))
           );
+          notifyMessagesRead();
         }
       } catch {
         setError("Could not open that conversation.");
@@ -107,7 +171,7 @@ export default function MessagesView() {
         const created: Message = await res.json();
         setThread((prev) => [...prev, created]);
         setDraft("");
-        loadConversations();
+        await loadConversations();
       } else {
         const err = await res.json().catch(() => ({}));
         setError(err.detail || "Could not send that message.");

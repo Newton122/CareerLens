@@ -10,7 +10,7 @@
  * 16px number in a bordered box indistinguishable from every other box.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -109,36 +109,41 @@ export default function ResultsPage() {
     type: "info" as "info" | "success" | "error" | "warning",
   }));
 
-  const fetchAnalysis = useCallback(async () => {
-    try {
-      const response = await apiCall(`/api/analyses/${analysisId}`);
-      const data = await response.json();
-      if (response.ok) {
-        setResult(data);
-      } else {
-        setDialog({
-          open: true,
-          title: "Could not load this analysis",
-          message: describeApiError(data, "Analysis not found"),
-          type: "error",
-        });
-      }
-    } catch (err) {
-      setDialog({
-        open: true,
-        title: "Could not load this analysis",
-        message: err instanceof Error ? err.message : "Something went wrong.",
-        type: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [analysisId]);
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
     if (!validId) return;
-    fetchAnalysis();
-  }, [validId, fetchAnalysis]);
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall(`/api/analyses/${analysisId}`);
+        const data = await response.json();
+        if (response.ok) {
+          if (active) setResult(data);
+        } else {
+          if (active) setDialog({
+            open: true,
+            title: "Could not load this analysis",
+            message: describeApiError(data, "Analysis not found"),
+            type: "error",
+          });
+        }
+      } catch (err) {
+        if (active) setDialog({
+          open: true,
+          title: "Could not load this analysis",
+          message: err instanceof Error ? err.message : "Something went wrong.",
+          type: "error",
+        });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [validId, analysisId]);
 
   if (loading) {
     return (

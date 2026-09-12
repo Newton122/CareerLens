@@ -261,3 +261,36 @@ def test_relaxed_limits_apply_only_outside_production(app_module):
     rule = app_module._login_account_limiter._rule
     assert rule.limit == 5
     assert rule.window_seconds == 900
+
+
+# --- password hashing without passlib ------------------------------------
+# passlib is unmaintained and breaks on Python 3.13, so hashing now calls
+# bcrypt directly. These pin that every account created under passlib still
+# signs in: the hashes below were produced by passlib's CryptContext.
+
+_PASSLIB_HASH = "$2b$12$zzw55W5uecumuAHJ12PwM.wAVZy1uzL74Dy8aN1UakYxku3SQ3n7u"
+_PASSLIB_LONG_HASH = "$2b$12$DFHRhh3HmDDrOTOZhzI2n.qREwE5k3iA8ZHvCrru6OpHemul7a47e"
+
+
+def test_hashes_made_by_passlib_still_verify():
+    from ai_job_intelligence.services.auth import verify_password
+
+    assert verify_password("legacy-passlib-password-42", _PASSLIB_HASH)
+    assert not verify_password("wrong-password-entirely", _PASSLIB_HASH)
+
+
+def test_long_passwords_behave_as_they_did_under_passlib():
+    # bcrypt reads only the first 72 bytes; passlib truncated silently.
+    from ai_job_intelligence.services.auth import hash_password, verify_password
+
+    long_password = "x" * 80 + "tail"
+    assert verify_password(long_password, _PASSLIB_LONG_HASH)
+    fresh = hash_password(long_password)
+    assert fresh.startswith("$2b$")
+    assert verify_password(long_password, fresh)
+
+
+def test_a_corrupt_stored_hash_is_a_failed_login_not_a_crash():
+    from ai_job_intelligence.services.auth import verify_password
+
+    assert verify_password("anything-at-all-123", "not-a-bcrypt-hash") is False

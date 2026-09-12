@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { FaSearch } from "react-icons/fa";
@@ -18,33 +17,36 @@ interface Application {
 }
 
 export default function ApplicationsPage() {
-  const router = useRouter();
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("");
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // Load on mount. State is set only in the promise callbacks, and not at all
+  // once the page has been left (`active`), so a slow response can never
+  // overwrite a newer page.
   useEffect(() => {
-    fetchApplications();
-  }, []);
-
-  const fetchApplications = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/applications");
-      if (response.ok) {
+    let active = true;
+    apiCall("/api/applications")
+      .then(async (response) => {
+        if (!response.ok) {
+          if (active) setDialog({ open: true, title: 'Error', message: "Failed to load applications", type: 'error' });
+          return;
+        }
         const data = await response.json();
-        setApplications(data);
-      } else {
-        setDialog({ open: true, title: 'Error', message: "Failed to load applications", type: 'error' });
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching applications", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (active) setApplications(data);
+      })
+      .catch((err) => {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching applications", type: 'error' });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = applications.filter((a) => {
     const matchesSearch =

@@ -1,47 +1,30 @@
-# AI Job Intelligence
+# CareerLens API (`ai-job-intelligence`)
 
-A simple AI-powered CV and job description analyzer built with FastAPI, Python, and a rule-based matching engine.
+The FastAPI backend of CareerLens: CV parsing, skill evidence, job matching,
+career insights, the CareerLens assistant, and the employer and admin
+workflows. The Next.js frontend lives in [`frontend/`](frontend/).
 
-## Stack
-
-- Next.js (frontend)
-- FastAPI (backend API)
-- PostgreSQL (future persistence)
-- Google GenAI (future extraction and explanation)
-- ML / embeddings / similarity scoring
-- File storage for CV uploads
-
-## MVP goals
-
-- Upload a CV PDF
-- Paste a job description
-- Extract CV text
-- Compare skills and experience
-- Return a match score plus recommendations
+**For a full explanation of how everything works, read
+[`../PROJECT_GUIDE.md`](../PROJECT_GUIDE.md).**
 
 ## Run locally
 
+Needs Python 3.12 and PostgreSQL.
+
 ```bash
 cd ai-job-intelligence
-uv sync
-source .venv/bin/activate
-uv run python -m ai_job_intelligence.main
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# create .env with at least DATABASE_URL=postgresql://user:pass@localhost:5432/ai_job_intelligence
+.venv/bin/uvicorn ai_job_intelligence.main:app --app-dir src --reload --port 8000
 ```
 
-Then open:
+Open <http://127.0.0.1:8000/docs> for the interactive API documentation.
+Database migrations run automatically at start-up.
 
-- http://127.0.0.1:8000/docs
+## Test
 
-## Project layout
-
-```text
-src/
-  ai_job_intelligence/
-    __init__.py
-    config.py
-    main.py
-    schemas.py
-    services/
-      __init__.py
-      pdf_parser.py
+```bash
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest -q          # runs in a throwaway PostgreSQL schema
 ```

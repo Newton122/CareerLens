@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { useUnreadMessageCount } from "@/components/unreadMessages";
+import VerifyEmailBanner from "@/components/VerifyEmailBanner";
 import { ReactNode, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -14,7 +16,6 @@ import {
   FaUpload,
   FaSignOutAlt,
   FaUser,
-  FaSearch,
   FaBars,
   FaRobot,
   FaCalendarAlt,
@@ -41,7 +42,13 @@ export default function JobSeekerLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { token, loading, logout } = useAuth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // The page the mobile sidebar was opened on. It counts as open only while
+  // you are still on that page, so navigating closes it -- derived during
+  // render instead of an effect that resets state after every navigation.
+  const [sidebarOpenOn, setSidebarOpenOn] = useState<string | null>(null);
+  const isSidebarOpen = sidebarOpenOn === pathname;
+  const setIsSidebarOpen = (open: boolean) => setSidebarOpenOn(open ? pathname : null);
+  const unread = useUnreadMessageCount(Boolean(token));
 
   useEffect(() => {
     if (!loading && !token) {
@@ -49,9 +56,6 @@ export default function JobSeekerLayout({
     }
   }, [token, loading, router]);
 
-  useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [pathname]);
 
   if (loading || !token) {
     return (
@@ -94,6 +98,14 @@ export default function JobSeekerLayout({
             >
               <item.icon className="w-4 h-4" />
               <span>{item.label}</span>
+              {item.path.endsWith("/messages") && unread > 0 && (
+                <span
+                  className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-xs font-semibold flex items-center justify-center"
+                  aria-label={`${unread} unread messages`}
+                >
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
             </motion.button>
           );
         })}
@@ -171,6 +183,7 @@ export default function JobSeekerLayout({
         </header>
 
         <main className="flex-1 overflow-x-hidden px-4 lg:px-8 py-6">
+          <VerifyEmailBanner />
           {children}
         </main>
       </div>

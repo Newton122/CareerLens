@@ -6,10 +6,11 @@ and that each side can only take the actions that belong to it.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
+from ai_job_intelligence.clock import utcnow
 from ai_job_intelligence.conftest import TEST_PASSWORD
 
 CANDIDATE_CV = b"""Dana Okoro
@@ -21,7 +22,7 @@ Education
 BSc Software Engineering
 """
 
-SOON = (datetime.utcnow() + timedelta(days=7)).isoformat()
+SOON = (utcnow() + timedelta(days=7)).isoformat()
 
 
 @pytest.fixture(scope="module")

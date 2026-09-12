@@ -2,7 +2,7 @@
 
 import { describeApiError } from "@/components/format";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_BASE, apiCall, viewFile } from "@/components/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
@@ -23,10 +23,6 @@ export default function CVPage() {
   const [dragActive, setDragActive] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
-  useEffect(() => {
-    fetchCVs();
-  }, []);
-
   const handleViewCV = async (cvId: number) => {
     try {
       await viewFile(`/api/cvs/${cvId}/download`);
@@ -35,20 +31,30 @@ export default function CVPage() {
     }
   };
 
-  const fetchCVs = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/cvs");
-      if (response.ok) {
-        const data = await response.json();
-        setCVs(data);
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching CVs", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Fetches and returns the CV list; callers decide what to do with it.
+  const loadCVs = useCallback(async (): Promise<CV[]> => {
+    const response = await apiCall("/api/cvs");
+    return response.ok ? response.json() : [];
+  }, []);
+
+  // State is set only in the promise callbacks, and never after the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
+  useEffect(() => {
+    let active = true;
+    loadCVs()
+      .then((data) => {
+        if (active) setCVs(data);
+      })
+      .catch((err) => {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching CVs", type: 'error' });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadCVs]);
 
   const handleFileUpload = async (file: File) => {
     const allowedTypes = [".pdf", ".txt", ".png", ".jpg", ".jpeg"];
@@ -80,7 +86,7 @@ export default function CVPage() {
 
        const result = await response.json();
        setDialog({ open: true, title: 'Success', message: "CV uploaded successfully", type: 'success' });
-       await fetchCVs();
+       setCVs(await loadCVs());
        router.push(`/analyze?cv_id=${result.cv_id}`);
      } catch (err) {
        setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Upload failed", type: 'error' });

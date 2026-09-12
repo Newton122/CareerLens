@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { FaSearch, FaFilter } from "react-icons/fa";
@@ -28,7 +27,6 @@ interface UserSummary {
 }
 
 export default function AdminUsersPage() {
-  const router = useRouter();
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -42,24 +40,27 @@ export default function AdminUsersPage() {
     onConfirm: () => {},
   });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/admin/users");
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data);
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall("/api/admin/users");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setUsers(data);
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading users", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading users", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const fetchUserDetail = async (userId: number) => {
     try {
@@ -69,7 +70,7 @@ export default function AdminUsersPage() {
         setSelectedUser(data);
         setShowDetail(true);
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error loading user details", type: 'error' });
     }
   };
@@ -93,7 +94,7 @@ export default function AdminUsersPage() {
             setDialog({ open: true, title: 'Success', message: "User deleted", type: 'success' });
             setUsers(users.filter((u) => u.id !== userId));
           }
-        } catch (err) {
+        } catch {
           setDialog({ open: true, title: 'Error', message: "Error deleting user", type: 'error' });
         }
       },

@@ -189,3 +189,74 @@ def test_corrupt_cv_upload_is_a_400(client, seeker):
         headers=seeker,
     )
     assert r.status_code == 400
+
+
+# --- profile images -------------------------------------------------------
+
+
+def _upload_image(client, headers, name="me.png", content=b"\x89PNG one", ctype="image/png"):
+    r = client.post("/api/upload-image", files={"file": (name, content, ctype)}, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()["image_url"]
+
+
+def test_image_names_are_generated_not_taken_from_the_client(client, seeker, app_module):
+    url = _upload_image(client, seeker, name="../../My Holiday Photo.PNG")
+    stored = url.rsplit("/", 1)[-1]
+
+    assert "Holiday" not in stored and ".." not in stored
+    assert stored.endswith(".png")
+    assert (app_module.IMAGES_DIR / stored).is_file()
+    assert client.get(url).content == b"\x89PNG one"
+
+
+def test_replacing_a_picture_removes_the_old_file(client, seeker, app_module):
+    first = _upload_image(client, seeker, content=b"\x89PNG first")
+    second = _upload_image(client, seeker, content=b"\x89PNG second")
+
+    assert not (app_module.IMAGES_DIR / first.rsplit("/", 1)[-1]).exists()
+    assert client.get(second).content == b"\x89PNG second"
+
+
+@pytest.mark.parametrize("name", ["..", ".", "missing.png"])
+def test_image_route_serves_only_files_in_the_images_folder(client, name):
+    assert client.get(f"/api/images/{name}").status_code == 404
+
+
+# --- what the candidate API reveals ---------------------------------------
+
+
+def test_candidate_cv_url_is_a_download_link_not_a_server_path(client, employer, seeker):
+    client.post("/api/upload-cv", files={"file": ("cv.txt", CV_BYTES, "text/plain")}, headers=seeker)
+    candidates = client.get("/api/candidates", headers=employer).json()
+    assert candidates
+    for c in candidates:
+        assert c["cv_url"] == f"/api/cvs/{c['id']}/download"
+        detail = client.get(f"/api/candidates/{c['id']}", headers=employer).json()
+        assert detail["cv_url"] == c["cv_url"]
+
+
+# --- company name and job listing -----------------------------------------
+
+
+def test_renaming_the_company_updates_existing_postings(client, employer):
+    job = client.post(
+        "/api/jobs",
+        json={"title": "Rename Check", "description": "Python role.", "location": "Remote"},
+        headers=employer,
+    ).json()
+    before = client.get("/api/company", headers=employer).json()
+
+    saved = client.post("/api/company", json={**before, "name": "Renamed Holdings"}, headers=employer)
+
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/jobs/{job['id']}", headers=employer).json()["company"] == "Renamed Holdings"
+    # Put it back for the other tests.
+    client.post("/api/company", json=before | {"name": before["name"] or "Example Corp"}, headers=employer)
+
+
+def test_job_list_application_counts_are_correct(client, employer, seeker):
+    jobs = client.get("/api/jobs", headers=employer).json()
+    for job in jobs[:5]:
+        actual = client.get(f"/api/jobs/{job['id']}/applications", headers=employer).json()
+        assert job["applications_count"] == len(actual)

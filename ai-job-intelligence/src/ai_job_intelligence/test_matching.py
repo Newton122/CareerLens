@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from ai_job_intelligence.conftest import TEST_PASSWORD
 from ai_job_intelligence.schemas import JobRequirements
 from ai_job_intelligence.services.ai_service import analyze_cv_text
 from ai_job_intelligence.services.matcher import analyze_match
@@ -156,3 +157,55 @@ def test_missing_skills_still_lower_the_score():
     )
     assert result["match_score"] < 60, result["match_score"]
     assert len(result["missing_skills"]) >= 3
+
+
+# --- the employer's "required skills" field counts ------------------------
+# Matching used to read requirements only from the description text, so a
+# skill the employer typed into the posting's skills field but did not repeat
+# in the prose was never scored for anyone.
+
+
+def _seeker_with_cv(client, email: str, cv: bytes) -> dict:
+    r = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": TEST_PASSWORD, "name": "M", "role": "job_seeker"},
+    )
+    assert r.status_code == 200, r.text
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    up = client.post(
+        "/api/upload-cv", files={"file": ("cv.txt", cv, "text/plain")}, headers=headers
+    )
+    assert up.status_code == 200, up.text
+    return headers
+
+
+def test_listed_required_skills_are_scored_even_if_not_in_the_description(client, employer):
+    job = client.post(
+        "/api/jobs",
+        json={
+            "title": "Platform Engineer",
+            # Names Python only; Terraform lives solely in required_skills,
+            # typed in lowercase the way employers usually do.
+            "description": "Join our platform team writing Python services.",
+            "location": "Remote",
+            "required_skills": ["python", "terraform"],
+        },
+        headers=employer,
+    )
+    assert job.status_code == 201, job.text
+    job_id = job.json()["id"]
+
+    without = _seeker_with_cv(
+        client, "listed.without@test.com", b"Skills\nPython, Django\nExperience\nPython developer for 4 years\n"
+    )
+    with_it = _seeker_with_cv(
+        client, "listed.with@test.com", b"Skills\nPython, Terraform\nExperience\nPython developer for 4 years\n"
+    )
+
+    missing = client.get(f"/api/jobs/{job_id}", headers=without).json()
+    covered = client.get(f"/api/jobs/{job_id}", headers=with_it).json()
+
+    # Shown with its proper spelling, and not double-counted with "python".
+    assert missing["skill_gaps"] == ["Terraform"]
+    assert covered["skill_gaps"] == []
+    assert covered["match_score"] > missing["match_score"]

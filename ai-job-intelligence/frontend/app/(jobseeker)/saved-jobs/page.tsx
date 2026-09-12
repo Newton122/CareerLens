@@ -32,24 +32,27 @@ export default function SavedJobsPage() {
     onConfirm: () => {},
   });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchSavedJobs();
-  }, []);
-
-  const fetchSavedJobs = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/saved-jobs");
-      if (response.ok) {
-        const data = await response.json();
-        setSavedJobs(data);
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall("/api/saved-jobs");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setSavedJobs(data);
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching saved jobs", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching saved jobs", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const removeSaved = async (jobId: number) => {
     setConfirmState({
@@ -64,7 +67,7 @@ export default function SavedJobsPage() {
             setSavedJobs(savedJobs.filter((j) => j.job_id !== jobId));
             setDialog({ open: true, title: 'Success', message: "Job removed", type: 'success' });
           }
-        } catch (err) {
+        } catch {
           setDialog({ open: true, title: 'Error', message: "Error removing job", type: 'error' });
         }
       },

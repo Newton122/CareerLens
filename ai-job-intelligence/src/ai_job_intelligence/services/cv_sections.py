@@ -75,11 +75,30 @@ def heading_section(line: str) -> str | None:
     # a separator so "Experience (2019 - 2024)" still reads as a heading.
     cleaned = re.split(r"[(\[]|\s{2,}|\t", cleaned)[0].strip()
 
+    exact = _section_named(cleaned)
+    if exact is not None:
+        return exact
+
+    # Compound headings: "Licenses & Certifications", "Education and
+    # Training", "Skills / Tools". The first part that names a section wins.
+    # Each part must still match a synonym exactly, so a job title such as
+    # "Research and Development Engineer" is not mistaken for a heading.
+    parts = [p.strip() for p in re.split(r"\s*(?:&|/|\+|\band\b)\s*", cleaned)]
+    if len(parts) > 1:
+        for part in parts:
+            section = _section_named(part)
+            if section is not None:
+                return section
+    return None
+
+
+def _section_named(name_text: str) -> str | None:
+    """The section whose synonym is exactly ``name_text``, if any."""
     for section, names in SECTION_SYNONYMS.items():
         for name in names:
             # Exact, or the heading plus a colon -- but never a substring
             # match, or "work" would fire on "Network Engineer".
-            if cleaned == name or cleaned == f"{name}:":
+            if name_text == name or name_text == f"{name}:":
                 return section
     return None
 

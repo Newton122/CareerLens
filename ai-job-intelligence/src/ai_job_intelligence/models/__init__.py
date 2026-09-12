@@ -1,3 +1,5 @@
+from ai_job_intelligence.models.analysis import Analysis
+from ai_job_intelligence.models.auth_token import AuthToken
 from ai_job_intelligence.models.cv import CV
 from ai_job_intelligence.models.user import User
 from ai_job_intelligence.models.user_profile import UserProfile
@@ -8,6 +10,8 @@ from ai_job_intelligence.models.interview import Interview
 from ai_job_intelligence.models.message import Message
 
 __all__ = [
+    "Analysis",
+    "AuthToken",
     "CV",
     "User",
     "UserProfile",

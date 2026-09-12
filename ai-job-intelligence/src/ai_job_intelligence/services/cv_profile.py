@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from ai_job_intelligence.clock import utcnow
 
 from ai_job_intelligence.models.cv import CV
 from ai_job_intelligence.schemas import CandidateProfile
@@ -45,7 +45,7 @@ def store_profile(cv: CV, profile: CandidateProfile) -> None:
     """Attach a parsed profile to a CV row (caller commits)."""
     cv.profile_json = profile.model_dump_json()
     cv.profile_version = PROFILE_VERSION
-    cv.profile_parsed_at = datetime.utcnow()
+    cv.profile_parsed_at = utcnow()
 
 
 def get_candidate_profile(db, cv: CV) -> CandidateProfile:

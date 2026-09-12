@@ -22,6 +22,29 @@ export function isSpecified(value: Score): value is number {
   return value !== null && value !== undefined;
 }
 
+/**
+ * How strongly a CV backs a skill, as reported by the API. This is evidence
+ * the parser actually has, unlike the old "advanced/beginner" label, which was
+ * assigned by position in the list.
+ */
+export type EvidenceLevel = "demonstrated" | "mentioned" | "listed";
+
+export const EVIDENCE_LABEL: Record<EvidenceLevel, string> = {
+  demonstrated: "Demonstrated",
+  mentioned: "Mentioned",
+  listed: "Listed only",
+};
+
+export const EVIDENCE_HELP =
+  "Demonstrated: used in a role, project or certification you described. " +
+  "Mentioned: named in your summary or elsewhere. " +
+  "Listed only: appears just in a skills list, which reviewers trust least.";
+
+/** Bar width for an evidence level. */
+export function evidenceWidth(level: EvidenceLevel): string {
+  return level === "demonstrated" ? "100%" : level === "mentioned" ? "60%" : "30%";
+}
+
 /** Format a salary figure the API returns as a plain integer. */
 export function formatSalary(value: number | null | undefined): string | null {
   if (value === null || value === undefined) return null;

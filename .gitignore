@@ -28,6 +28,9 @@ wheels/
 # Uploaded user content
 uploads/
 
+# Downloaded embedding model (see services/embedding_service.py)
+.model_cache/
+
 # Test and tooling caches
 .pytest_cache/
 .ruff_cache/

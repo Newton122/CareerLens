@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { motion } from "framer-motion";
 import { FaUsers, FaBriefcase, FaFileAlt, FaChartLine, FaUpload, FaArrowRight } from "react-icons/fa";
+import type { IconType } from "react-icons";
 import MessageDialog from "@/components/MessageDialog";
 
 interface AdminStats {
@@ -34,36 +35,39 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after each request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchStats();
-    fetchUsers();
+    let active = true;
+    // Statistics and recent users load side by side.
+    (async () => {
+      try {
+        const response = await apiCall("/api/admin/stats");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setStats(data);
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading stats", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    (async () => {
+      try {
+        const response = await apiCall("/api/admin/users");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setRecentUsers(data.slice(0, 8));
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading users", type: 'error' });
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
-
-  const fetchStats = async () => {
-    try {
-      const response = await apiCall("/api/admin/stats");
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data);
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading stats", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const response = await apiCall("/api/admin/users");
-      if (response.ok) {
-        const data = await response.json();
-        setRecentUsers(data.slice(0, 8));
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading users", type: 'error' });
-    }
-  };
 
   if (loading) {
     return (
@@ -203,7 +207,7 @@ export default function AdminDashboard() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: any; color: string }) {
+function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: IconType; color: string }) {
   const colorClasses: Record<string, string> = {
     rose: "from-rose-500/20 to-rose-500/5 border-rose-500/20 text-rose-400",
     blue: "from-blue-500/20 to-blue-500/5 border-blue-500/20 text-blue-400",
@@ -220,7 +224,7 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
   );
 }
 
-function QuickAction({ icon: Icon, label, onClick, color }: { icon: any; label: string; onClick: () => void; color: string }) {
+function QuickAction({ icon: Icon, label, onClick, color }: { icon: IconType; label: string; onClick: () => void; color: string }) {
   const colorClasses: Record<string, string> = {
     rose: "text-rose-400 bg-rose-500/10 border-rose-500/20 hover:bg-rose-500/20",
     blue: "text-blue-400 bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20",

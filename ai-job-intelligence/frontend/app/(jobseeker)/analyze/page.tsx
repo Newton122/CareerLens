@@ -1,6 +1,12 @@
 "use client";
 
-import { formatScore } from "@/components/format";
+import {
+  EVIDENCE_HELP,
+  EVIDENCE_LABEL,
+  evidenceWidth,
+  formatScore,
+  type EvidenceLevel,
+} from "@/components/format";
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -28,7 +34,7 @@ interface AnalysisData {
   strengths: string[];
   weaknesses: string[];
   recommendations: string[];
-  skills: Array<{ name: string; proficiency: string }>;
+  skills: Array<{ name: string; evidence: EvidenceLevel }>;
   experience: string[];
   education: string[];
   projects: string[];
@@ -66,48 +72,50 @@ export default function AnalyzePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => searchParams.get("cv_id") !== null);
   const [analyzing, setAnalyzing] = useState(false);
   const [jobs, setJobs] = useState<JobRecommendation[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [showJobs, setShowJobs] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`). With no CV in the URL there is nothing to load,
+  // which `loading`'s initial value already reflects.
   useEffect(() => {
     const cvId = searchParams.get("cv_id");
-    if (cvId) {
-      fetchAnalysis(cvId);
-    } else {
-      setLoading(false);
-    }
+    if (!cvId) return;
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall(`/api/cvs/${cvId}/analysis`);
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setAnalysis({
+            ...data,
+            skills: data.skills || [],
+            experience: data.experience || [],
+            education: data.education || [],
+            projects: data.projects || [],
+            certifications: data.certifications || [],
+            strengths: data.strengths || [],
+            weaknesses: data.weaknesses || [],
+            recommendations: data.recommendations || [],
+          } as AnalysisData);
+        } else {
+          if (active) setDialog({ open: true, title: 'Error', message: "Failed to load profile", type: 'error' });
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading profile", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [searchParams]);
 
-  const fetchAnalysis = async (cvId: string) => {
-    setLoading(true);
-    try {
-      const response = await apiCall(`/api/cvs/${cvId}/analysis`);
-      if (response.ok) {
-        const data = await response.json();
-        setAnalysis({
-          ...data,
-          skills: data.skills || [],
-          experience: data.experience || [],
-          education: data.education || [],
-          projects: data.projects || [],
-          certifications: data.certifications || [],
-          strengths: data.strengths || [],
-          weaknesses: data.weaknesses || [],
-          recommendations: data.recommendations || [],
-        } as AnalysisData);
-      } else {
-        setDialog({ open: true, title: 'Error', message: "Failed to load profile", type: 'error' });
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading profile", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleFindJobs = async () => {
     const cvId = searchParams.get("cv_id");
@@ -168,10 +176,10 @@ export default function AnalyzePage() {
     }
   };
 
-  const getProficiencyColor = (proficiency: string) => {
-    switch (proficiency) {
-      case "advanced": return "from-blue-600 to-emerald-500";
-      case "intermediate": return "from-blue-500 to-cyan-600";
+  const getEvidenceColor = (level: EvidenceLevel) => {
+    switch (level) {
+      case "demonstrated": return "from-blue-600 to-emerald-500";
+      case "mentioned": return "from-blue-500 to-cyan-600";
       default: return "from-neutral-500 to-neutral-600";
     }
   };
@@ -296,21 +304,20 @@ export default function AnalyzePage() {
         >
           <h3 className="text-lg font-semibold text-neutral-200 mb-4 flex items-center gap-2">
             <FaChartLine className="w-5 h-5 text-blue-400" />
-            Skills & Proficiency
+            Skills & Evidence
           </h3>
+          <p className="text-xs text-neutral-500 mb-4 -mt-2">{EVIDENCE_HELP}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {analysis.skills.map((skill, i) => (
               <div key={i} className="flex items-center gap-3">
                 <span className="text-sm text-neutral-300 w-40 truncate">{skill.name}</span>
                 <div className="flex-1 h-2 bg-neutral-700/50 rounded-full overflow-hidden">
                   <div
-                    className={`h-2 rounded-full bg-gradient-to-r ${getProficiencyColor(skill.proficiency)}`}
-                    style={{
-                      width: skill.proficiency === "advanced" ? "90%" : skill.proficiency === "intermediate" ? "60%" : "30%",
-                    }}
+                    className={`h-2 rounded-full bg-gradient-to-r ${getEvidenceColor(skill.evidence)}`}
+                    style={{ width: evidenceWidth(skill.evidence) }}
                   />
                 </div>
-                <span className="text-xs text-neutral-500 w-20 capitalize">{skill.proficiency}</span>
+                <span className="text-xs text-neutral-500 w-24">{EVIDENCE_LABEL[skill.evidence]}</span>
               </div>
             ))}
           </div>

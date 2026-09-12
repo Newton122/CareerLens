@@ -32,33 +32,36 @@ export default function EmployerCompanyPage() {
   const [saving, setSaving] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchCompanyProfile();
-  }, []);
-
-  const fetchCompanyProfile = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/company");
-      if (response.ok) {
-        const data = await response.json();
-        setFormData({
-          id: data.id,
-          name: data.name || "",
-          description: data.description || "",
-          industry: data.industry || "",
-          company_size: data.company_size || "1-10",
-          website: data.website || "",
-          linkedin: data.linkedin || "",
-          twitter: data.twitter || "",
-        });
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall("/api/company");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setFormData({
+            id: data.id,
+            name: data.name || "",
+            description: data.description || "",
+            industry: data.industry || "",
+            company_size: data.company_size || "1-10",
+            website: data.website || "",
+            linkedin: data.linkedin || "",
+            twitter: data.twitter || "",
+          });
+        }
+      } catch {
+        // No company profile yet - start with defaults
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      // No company profile yet - start with defaults
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -82,7 +85,7 @@ export default function EmployerCompanyPage() {
         const data = await response.json();
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Failed to save profile"), type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error saving profile", type: 'error' });
     } finally {
       setSaving(false);

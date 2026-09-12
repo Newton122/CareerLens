@@ -27,7 +27,12 @@ export default function AdminLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { token, loading, logout, role } = useAuth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // The page the mobile sidebar was opened on. It counts as open only while
+  // you are still on that page, so navigating closes it -- derived during
+  // render instead of an effect that resets state after every navigation.
+  const [sidebarOpenOn, setSidebarOpenOn] = useState<string | null>(null);
+  const isSidebarOpen = sidebarOpenOn === pathname;
+  const setIsSidebarOpen = (open: boolean) => setSidebarOpenOn(open ? pathname : null);
 
   useEffect(() => {
     if (!loading) {
@@ -39,9 +44,6 @@ export default function AdminLayout({
     }
   }, [token, loading, role, router]);
 
-  useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [pathname]);
 
   if (loading || !token || role !== "admin") {
     return (

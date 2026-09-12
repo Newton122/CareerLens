@@ -52,10 +52,30 @@ CORS_ORIGINS = [
     origin.strip().rstrip("/")
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000",
+        # `npm run dev` serves the frontend on port 3001.
+        "http://localhost:3001,http://127.0.0.1:3001",
     ).split(",")
     if origin.strip()
 ]
+
+# Where the frontend lives, for links in emails ("reset your password").
+# Defaults to the first allowed origin, which in production is the Vercel URL,
+# so a deployment that has set CORS_ORIGINS needs nothing extra.
+FRONTEND_URL = (os.getenv("FRONTEND_URL") or CORS_ORIGINS[0]).rstrip("/")
+
+# Outgoing email (password reset, email verification). Any SMTP provider
+# works: Gmail with an app password, Resend, Brevo, Mailgun... Leave SMTP_HOST
+# unset to disable sending; in development the email is then written to the
+# server log instead, so the links can still be used locally.
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USERNAME
+# "starttls" (port 587), "ssl" (port 465) or "none" (a local test server).
+SMTP_SECURITY = (
+    os.getenv("SMTP_SECURITY") or ("ssl" if SMTP_PORT == 465 else "starttls")
+).strip().lower()
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)

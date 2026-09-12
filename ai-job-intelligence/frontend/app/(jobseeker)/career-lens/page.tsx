@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { describeApiError } from "@/components/format";
 import { motion, AnimatePresence } from "framer-motion";
-import { FaBookOpen, FaRobot, FaUser, FaArrowRight, FaPaperPlane, FaLightbulb } from "react-icons/fa";
+import { FaBookOpen, FaRobot, FaUser, FaPaperPlane, FaLightbulb } from "react-icons/fa";
 import MessageDialog from "@/components/MessageDialog";
 
 interface Source {
@@ -46,9 +46,11 @@ export default function CareerLensPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [cvId, setCvId] = useState<string | null>(searchParams.get("cv_id"));
+  const [cvId] = useState<string | null>(searchParams.get("cv_id"));
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Unique keys for chat bubbles; a counter is enough and keeps render pure.
+  const nextMessageId = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,7 +61,7 @@ export default function CareerLensPage() {
     if (!message) return;
 
     const userMessage: Message = {
-      id: `user-${Date.now()}`,
+      id: `user-${++nextMessageId.current}`,
       role: "user",
       content: message,
     };
@@ -80,7 +82,7 @@ export default function CareerLensPage() {
       const data = await response.json();
       if (response.ok) {
         const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
+          id: `assistant-${++nextMessageId.current}`,
           role: "assistant",
           content: data.response,
           sources: data.sources ?? [],

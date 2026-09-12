@@ -12,6 +12,7 @@ import importlib
 import os
 import re
 import sys
+import time
 import uuid
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -37,9 +38,31 @@ if not re.match(r"^postgres(ql)?(\+\w+)?://", _server_url):
 
 # libpq wants a plain postgresql:// URL; SQLAlchemy wants the driver named.
 _libpq_url = re.sub(r"^postgres(ql)?(\+\w+)?://", "postgresql://", _server_url)
-TEST_SCHEMA = f"test_{uuid.uuid4().hex[:12]}"
+# The creation time is part of the name so a later run can tell a schema
+# abandoned by a killed run (which never reaches pytest_sessionfinish) from
+# one a concurrent run is still using.
+TEST_SCHEMA = f"test_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+_STALE_AFTER_SECONDS = 6 * 60 * 60
+
+
+def _is_abandoned(name: str) -> bool:
+    stamped = re.fullmatch(r"test_(\d{10})_[0-9a-f]{8}", name)
+    if stamped:
+        return time.time() - int(stamped.group(1)) > _STALE_AFTER_SECONDS
+    # The earlier naming scheme, which had no timestamp.
+    return re.fullmatch(r"test_[0-9a-f]{12}", name) is not None
+
 
 with psycopg.connect(_libpq_url, autocommit=True) as _conn:
+    _conn.execute("SET lock_timeout = '5s'")
+    for (_name,) in _conn.execute(
+        "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'test\\_%'"
+    ).fetchall():
+        if _is_abandoned(_name):
+            try:
+                _conn.execute(f'DROP SCHEMA IF EXISTS "{_name}" CASCADE')
+            except psycopg.Error:
+                pass  # in use or already gone; try again next run
     _conn.execute(f'CREATE SCHEMA "{TEST_SCHEMA}"')
 
 # Every connection the app opens resolves unqualified table names to the
@@ -79,8 +102,10 @@ def app_module(tmp_path_factory):
 
     # Re-import so config picks up the test upload directories and the engine
     # binds to the throwaway schema.
+    # conftest itself is kept: re-importing it would run the set-up above
+    # again and create a second schema that nothing drops.
     for mod in list(sys.modules):
-        if mod.startswith("ai_job_intelligence"):
+        if mod.startswith("ai_job_intelligence") and mod != __name__:
             del sys.modules[mod]
     return importlib.import_module("ai_job_intelligence.main")
 
@@ -141,6 +166,9 @@ def _reset_rate_limiters(app_module):
         app_module._login_ip_limiter,
         app_module._login_account_limiter,
         app_module._register_limiter,
+        app_module._forgot_ip_limiter,
+        app_module._forgot_account_limiter,
+        app_module._resend_verification_limiter,
     )
     for limiter in limiters:
         limiter.clear()

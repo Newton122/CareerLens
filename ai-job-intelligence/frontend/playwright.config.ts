@@ -11,7 +11,15 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Both servers are started automatically. The API runs against the PostgreSQL
  * database named by E2E_DATABASE_URL, which must be reserved for end-to-end
- * runs so a test never touches development data.
+ * runs so a test never touches development data. A separate schema in your
+ * usual database works well (create it once):
+ *
+ *   psql ... -c 'CREATE SCHEMA e2e'
+ *   E2E_DATABASE_URL='postgresql://user:pass@localhost:5432/ai_job_intelligence?options=-csearch_path%3De2e' \
+ *     npm run test:e2e
+ *
+ * Every test creates its own accounts (unique email addresses), so the schema
+ * never needs resetting between runs.
  */
 const E2E_DATABASE_URL = process.env.E2E_DATABASE_URL;
 if (!E2E_DATABASE_URL) {
@@ -51,7 +59,7 @@ export default defineConfig({
 
   webServer: [
     {
-      command: `.venv/bin/python -m uvicorn ai_job_intelligence.main:app --port ${API_PORT}`,
+      command: `.venv/bin/python -m uvicorn ai_job_intelligence.main:app --app-dir src --port ${API_PORT}`,
       cwd: "..",
       env: {
         // A dedicated database and uploads directory keep the developer's
@@ -63,10 +71,11 @@ export default defineConfig({
         GOOGLE_API_KEY: "",
         APP_ENV: "development",
         UPLOAD_DIR: "./.e2e-uploads",
+        IMAGES_DIR: "./.e2e-uploads/images",
       },
       url: `http://127.0.0.1:${API_PORT}/`,
       reuseExistingServer: false,
-      timeout: 180_000, // first boot loads the sentence-transformers model
+      timeout: 180_000, // the first boot downloads the embedding model
       stdout: "pipe",
       stderr: "pipe",
     },

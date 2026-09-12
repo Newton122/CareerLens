@@ -40,31 +40,34 @@ export default function JobDetailPage() {
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
   const isAdmin = role === "admin";
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchJob();
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall(`/api/jobs/${jobId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setJob(data);
+        }
+        // Seed the toggle so an already-saved job offers "Unsave" rather than
+        // failing with "Job already saved".
+        const savedRes = await apiCall("/api/saved-jobs");
+        if (savedRes.ok) {
+          const savedJobs: { job_id: number }[] = await savedRes.json();
+          if (active) setSaved(savedJobs.some((s) => s.job_id === parseInt(jobId)));
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading job", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [jobId]);
-
-  const fetchJob = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall(`/api/jobs/${jobId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setJob(data);
-      }
-      // Seed the toggle so an already-saved job offers "Unsave" rather than
-      // failing with "Job already saved".
-      const savedRes = await apiCall("/api/saved-jobs");
-      if (savedRes.ok) {
-        const savedJobs: { job_id: number }[] = await savedRes.json();
-        setSaved(savedJobs.some((s) => s.job_id === parseInt(jobId)));
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading job", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleApply = async () => {
     setApplying(true);
@@ -80,7 +83,7 @@ export default function JobDetailPage() {
       } else {
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Failed to apply"), type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error submitting application", type: 'error' });
     } finally {
       setApplying(false);
@@ -104,7 +107,7 @@ export default function JobDetailPage() {
       } else {
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Error saving job"), type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error saving job", type: 'error' });
     }
   };

@@ -1,48 +1,37 @@
 # CareerLens
-# AI Job Intelligence
 
-A simple AI-powered CV and job description analyzer built with FastAPI, Python, and a rule-based matching engine.
+An AI-powered career platform: job seekers upload a CV, see which skills it
+actually evidences, get matched to jobs, and get specific advice on what to
+learn next; employers post jobs, search candidates by meaning rather than
+keywords, and run interviews and messaging; admins oversee the platform.
+
+**New here? Read [PROJECT_GUIDE.md](PROJECT_GUIDE.md)**: a complete explanation of every part of the project, how to run it, and how to deploy it.
 
 ## Stack
 
-- Next.js (frontend)
-- FastAPI (backend API)
-- PostgreSQL (future persistence)
-- Google GenAI (future extraction and explanation)
-- ML / embeddings / similarity scoring
-- File storage for CV uploads
-
-## MVP goals
-
-- Upload a CV PDF
-- Paste a job description
-- Extract CV text
-- Compare skills and experience
-- Return a match score plus recommendations
+- **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS (deployed on Vercel)
+- **Backend:** FastAPI, SQLAlchemy, Alembic (deployed on Render)
+- **Database:** PostgreSQL
+- **AI:** rule-based skill extraction, `all-MiniLM-L6-v2` embeddings on ONNX
+  Runtime for semantic matching, and optional Google Gemini
 
 ## Run locally
 
 ```bash
+# Backend (needs PostgreSQL; set DATABASE_URL in ai-job-intelligence/.env)
 cd ai-job-intelligence
-uv sync
-source .venv/bin/activate
-uv run python -m ai_job_intelligence.main
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn ai_job_intelligence.main:app --app-dir src --reload --port 8000
+
+# Frontend, in a second terminal
+cd ai-job-intelligence/frontend
+npm install && npm run dev          # http://localhost:3001
 ```
 
-Then open:
+## Test
 
-- http://127.0.0.1:8000/docs
-
-## Project layout
-
-```text
-src/
-  ai_job_intelligence/
-    __init__.py
-    config.py
-    main.py
-    schemas.py
-    services/
-      __init__.py
-      pdf_parser.py
+```bash
+cd ai-job-intelligence && .venv/bin/python -m pytest -q     # backend
+cd ai-job-intelligence/frontend && npm run lint && npm run build
+# Browser tests: see the comment at the top of frontend/playwright.config.ts
 ```

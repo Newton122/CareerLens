@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { apiCall } from "@/components/api";
 import MessageDialog from "@/components/MessageDialog";
@@ -44,36 +44,50 @@ export default function EmployerJobDetailPage() {
     onConfirm: () => {},
   });
 
-  useEffect(() => {
-    fetchJobDetail();
-    fetchApplications();
+  // Fetches and returns the applicants; used on load and after accept/reject.
+  const loadApplications = useCallback(async (): Promise<Application[]> => {
+    const response = await apiCall(`/api/jobs/${jobId}/applications`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
   }, [jobId]);
 
-  const fetchJobDetail = async () => {
+  const refreshApplications = async () => {
     try {
-      const response = await apiCall(`/api/jobs/${jobId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setJob(data);
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading job details", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchApplications = async () => {
-    try {
-      const response = await apiCall(`/api/jobs/${jobId}/applications`);
-      if (response.ok) {
-        const data = await response.json();
-        setApplications(Array.isArray(data) ? data : []);
-      }
-    } catch (err) {
+      setApplications(await loadApplications());
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error fetching applications", type: 'error' });
     }
   };
+
+  // State is set only after each request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall(`/api/jobs/${jobId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setJob(data);
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading job details", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    loadApplications()
+      .then((data) => {
+        if (active) setApplications(data);
+      })
+      .catch(() => {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error fetching applications", type: 'error' });
+      });
+    return () => {
+      active = false;
+    };
+  }, [jobId, loadApplications]);
 
   const handleAccept = async (appId: number) => {
     setConfirmState({
@@ -86,9 +100,9 @@ export default function EmployerJobDetailPage() {
           });
           if (response.ok) {
             setDialog({ open: true, title: 'Success', message: "Application accepted!", type: 'success' });
-            fetchApplications();
+            await refreshApplications();
           }
-        } catch (err) {
+        } catch {
           setDialog({ open: true, title: 'Error', message: "Error accepting application", type: 'error' });
         }
       },
@@ -106,9 +120,9 @@ export default function EmployerJobDetailPage() {
           });
           if (response.ok) {
             setDialog({ open: true, title: 'Success', message: "Application rejected", type: 'success' });
-            fetchApplications();
+            await refreshApplications();
           }
-        } catch (err) {
+        } catch {
           setDialog({ open: true, title: 'Error', message: "Error rejecting application", type: 'error' });
         }
       },

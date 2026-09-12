@@ -77,7 +77,7 @@ export default function PostNewJobPage() {
       } else {
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Failed to create job posting"), type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error creating job posting", type: 'error' });
     } finally {
       setLoading(false);

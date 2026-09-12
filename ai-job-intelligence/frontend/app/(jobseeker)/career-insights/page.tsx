@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { motion } from "framer-motion";
@@ -36,26 +36,31 @@ export default function CareerInsightsPage() {
   const [resetting, setResetting] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
-  useEffect(() => {
-    fetchInsights();
+  // Fetches and returns the insights; callers decide what to do with them.
+  const loadInsights = useCallback(async (): Promise<CareerInsight> => {
+    const response = await apiCall("/api/career-insights");
+    if (!response.ok) throw new Error("Failed to load insights");
+    return response.json();
   }, []);
 
-  const fetchInsights = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/career-insights");
-      if (response.ok) {
-        const data = await response.json();
-        setInsights(data);
-      } else {
-        setDialog({ open: true, title: 'Error', message: "Failed to load insights", type: 'error' });
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading insights", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // State is set only in the promise callbacks, and never after the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
+  useEffect(() => {
+    let active = true;
+    loadInsights()
+      .then((data) => {
+        if (active) setInsights(data);
+      })
+      .catch((err) => {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading insights", type: 'error' });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadInsights]);
 
   const handleReset = async () => {
     setResetting(true);
@@ -63,7 +68,7 @@ export default function CareerInsightsPage() {
       const response = await apiCall("/api/reset-data", { method: "POST" });
       if (response.ok) {
         setDialog({ open: true, title: 'Success', message: "All data has been reset", type: 'success' });
-        fetchInsights();
+        setInsights(await loadInsights());
       } else {
         setDialog({ open: true, title: 'Error', message: "Failed to reset data", type: 'error' });
       }

@@ -35,11 +35,10 @@ interface Candidate {
 interface MessageModalProps {
   isOpen: boolean;
   onClose: () => void;
-  candidateId: string;
   onSend: (content: string) => void;
 }
 
-function MessageModal({ isOpen, onClose, candidateId, onSend }: MessageModalProps) {
+function MessageModal({ isOpen, onClose, onSend }: MessageModalProps) {
   const [content, setContent] = useState("");
 
   if (!isOpen) return null;
@@ -101,24 +100,27 @@ export default function EmployerCandidateDetailPage() {
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchCandidateDetail();
-  }, [candidateId]);
-
-  const fetchCandidateDetail = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall(`/api/candidates/${candidateId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setCandidate(data);
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall(`/api/candidates/${candidateId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setCandidate(data);
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading candidate details", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading candidate details", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, [candidateId]);
 
   // Scheduling used to post a fixed "seven days from now" with no joining
   // details at all, which produced interviews nobody could actually attend.
@@ -148,7 +150,7 @@ export default function EmployerCandidateDetailPage() {
         const err = await response.json().catch(() => ({}));
         setDialog({ open: true, title: 'Could not send', message: err.detail || "Failed to send message", type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error sending message", type: 'error' });
     }
   };
@@ -197,10 +199,12 @@ export default function EmployerCandidateDetailPage() {
               )}
             </div>
             <div className="text-right">
-              <p className="text-base font-bold text-blue-600">
+              <p className="text-base font-bold text-blue-600" title="How complete the candidate's CV is: skills, experience, education. Not a match against one of your jobs.">
                 {candidate.match_score}%
               </p>
-              <p className="text-base text-neutral-400">Match Score</p>
+              {/* The API field is still called match_score, but it measures
+                  how complete the CV is, not fit for a particular job. */}
+              <p className="text-base text-neutral-400" title="How complete the candidate's CV is: skills, experience, education. Not a match against one of your jobs.">Profile score</p>
             </div>
           </div>
         </div>
@@ -300,7 +304,6 @@ export default function EmployerCandidateDetailPage() {
         <MessageModal
           isOpen={messageModalOpen}
           onClose={() => setMessageModalOpen(false)}
-          candidateId={candidateId}
           onSend={handleSendMessage}
         />
         <InterviewScheduler

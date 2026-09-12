@@ -15,6 +15,26 @@ export const API_BASE = (
   process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000"
 ).replace(/\/+$/, "");
 
+// ─── The login session, kept in localStorage ──────────────────────────────
+
+export const SESSION_KEYS = ["access_token", "user_id", "careerLens_role", "user_email"] as const;
+
+/** Fired in this tab when the session changes (other tabs get "storage"). */
+export const AUTH_CHANGED_EVENT = "careerlens-auth-changed";
+
+/** Fired when the API says the session is no longer valid. */
+export const SESSION_EXPIRED_EVENT = "careerlens-session-expired";
+
+export function notifySessionChanged() {
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
+/** Forget the session in this browser; every open tab updates. */
+export function clearStoredSession() {
+  SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
+  notifySessionChanged();
+}
+
 export function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("access_token");
   if (token) {
@@ -27,15 +47,23 @@ export async function apiCall(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<Response> {
+  const authHeaders = getAuthHeaders();
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     cache: "no-store",
     headers: {
       "Content-Type": "application/json",
-      ...getAuthHeaders(),
+      ...authHeaders,
       ...options.headers,
     },
   });
+  // A signed-in request refused as unauthenticated means the session is
+  // over: the token expired (after 24 hours) or was revoked by a password
+  // reset. Sign this browser out; the layouts then send the user to /login.
+  if (response.status === 401 && authHeaders.Authorization) {
+    clearStoredSession();
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  }
   return response;
 }
 

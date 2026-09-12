@@ -1,16 +1,17 @@
-from ai_job_intelligence.database import Base, engine
-from ai_job_intelligence.models.cv import CV
-from ai_job_intelligence.models.analysis import Analysis
-from ai_job_intelligence.models.user import User
-from ai_job_intelligence.models.user_profile import UserProfile
-from ai_job_intelligence.models.job import Job
-from ai_job_intelligence.models.application import Application
-from ai_job_intelligence.models.saved_job import SavedJob
+"""Bring the database schema up to date without starting the web server.
+
+    PYTHONPATH=src python -m ai_job_intelligence.init_db
+
+The server does the same thing automatically at start-up (see migrate.py),
+so this is only needed to prepare a database ahead of time. It used to call
+``Base.metadata.create_all``, which bypasses the migration history.
+"""
+from ai_job_intelligence.migrate import upgrade_database
+
 
 def init_db() -> None:
-    """Initialize the database and create tables."""
-    Base.metadata.create_all(bind=engine)
-    print("Database initialized and tables created.")
+    upgrade_database()
+    print("Database schema is up to date.")
 
 
 if __name__ == "__main__":

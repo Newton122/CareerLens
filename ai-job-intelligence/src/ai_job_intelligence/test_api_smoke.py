@@ -157,3 +157,25 @@ def test_employer_flow(client, employer):
 
 def test_unauthenticated_requests_are_rejected(client):
     assert client.get("/api/profile").status_code in (401, 403)
+
+
+def test_skills_are_labelled_by_evidence_not_list_position(client, seeker):
+    """The CV report used to call the top third of skills "advanced" purely
+    by their position in the list. It now reports how the CV backs each one."""
+    cv = (
+        b"Kim Otieno\nSkills\nPython, Figma\n"
+        b"Experience\nBackend developer, built REST APIs with Django for 3 years\n"
+    )
+    up = client.post(
+        "/api/upload-cv", files={"file": ("kim.txt", cv, "text/plain")}, headers=seeker
+    )
+    assert up.status_code == 200, up.text
+    report = client.get(f"/api/cvs/{up.json()['cv_id']}/analysis", headers=seeker).json()
+    levels = {s["name"]: s["evidence"] for s in report["skills"]}
+
+    assert levels["Django"] == "demonstrated"   # used in a described role
+    assert levels["Figma"] == "listed"          # only in the skills list
+    assert all("proficiency" not in s for s in report["skills"])
+    # Strongest evidence first.
+    order = [s["evidence"] for s in report["skills"]]
+    assert order == sorted(order, key=["demonstrated", "mentioned", "listed"].index)

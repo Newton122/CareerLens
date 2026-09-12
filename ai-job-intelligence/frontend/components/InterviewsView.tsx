@@ -10,7 +10,7 @@
  * getting the two people into the same room.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FaCalendarPlus,
   FaCheck,
@@ -338,26 +338,30 @@ export default function InterviewsView({
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Interview | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await apiCall("/api/interviews");
-      if (res.ok) {
-        setInterviews(await res.json());
-        setError("");
-      } else {
-        setError("Could not load interviews.");
-      }
-    } catch {
-      setError("Could not load interviews.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // State is set only after the request returns, and never once the view
+  // has gone (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    (async () => {
+      try {
+        const res = await apiCall("/api/interviews");
+        if (!active) return;
+        if (res.ok) {
+          const data: Interview[] = await res.json();
+          if (active) setInterviews(data);
+        } else {
+          setError("Could not load interviews.");
+        }
+      } catch {
+        if (active) setError("Could not load interviews.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const update = async (id: number, status: string) => {
     setBusyId(id);

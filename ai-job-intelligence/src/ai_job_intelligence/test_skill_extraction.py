@@ -170,3 +170,55 @@ def test_an_unrelated_cv_does_not_match_a_technical_job():
     # Reading prose must not become a licence to invent skills.
     assert result["matched_skills"] == []
     assert result["match_score"] < 20
+
+
+# --- education, certifications and projects -------------------------------
+# These used their own scanners that only recognised a line *starting* with
+# the exact word, and when nothing was found they inserted text the CV never
+# contained ("Bachelor's degree in Computer Science or related field").
+
+
+
+@pytest.mark.parametrize(
+    "heading, section",
+    [
+        ("LICENSES & CERTIFICATIONS", "certifications"),
+        ("Education and Training", "education"),
+        ("Skills / Tools", "skills"),
+        ("Projects + Open Source", "projects"),
+        # Job titles that merely contain a section word are not headings.
+        ("Research and Development Engineer", None),
+        ("Sales & Marketing Manager", None),
+    ],
+)
+def test_compound_headings(heading, section):
+    assert heading_section(heading) == section
+
+
+def test_sections_under_any_heading_name_are_found():
+    profile = analyze_cv_text(
+        "Ann Lee\n"
+        "ACADEMIC BACKGROUND\nBSc Statistics, University of Nairobi (2019)\n"
+        "LICENSES & CERTIFICATIONS\nGoogle Data Analytics Certificate\n"
+        "SELECTED PROJECTS\nBuilt a churn model in Python for a telecom dataset\n"
+    )
+    assert profile.education == ["BSc Statistics, University of Nairobi (2019)"]
+    assert profile.certifications == ["Google Data Analytics Certificate"]
+    assert profile.projects == ["Built a churn model in Python for a telecom dataset"]
+
+
+def test_no_heading_means_the_cvs_own_words_not_invented_ones():
+    profile = analyze_cv_text(
+        "Bob Kim\nI hold a degree in engineering and have 5 years in sales.\n"
+    )
+    assert profile.education == [
+        "I hold a degree in engineering and have 5 years in sales."
+    ]
+    assert "Bachelor's degree in Computer Science or related field" not in profile.education
+
+
+def test_nothing_is_invented_for_a_cv_that_says_nothing():
+    profile = analyze_cv_text("Carol\nSkills\nPython\n")
+    assert profile.education == []
+    assert profile.experience == []
+    assert profile.certifications == []

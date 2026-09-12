@@ -44,36 +44,39 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchProfile();
-  }, []);
-
-  const fetchProfile = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/profile");
-      if (response.ok) {
-        const data = await response.json();
-        setProfile({
-          name: data.name || "",
-          email: data.email || authEmail || "",
-          role: data.role || role || "job_seeker",
-          company: data.company || "",
-          description: data.description || "",
-          industry: data.industry || "",
-          company_size: data.company_size || "",
-          website: data.website || "",
-          linkedin: data.linkedin || "",
-          twitter: data.twitter || "",
-          image_url: data.image_url || "",
-        });
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall("/api/profile");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setProfile({
+            name: data.name || "",
+            email: data.email || authEmail || "",
+            role: data.role || role || "job_seeker",
+            company: data.company || "",
+            description: data.description || "",
+            industry: data.industry || "",
+            company_size: data.company_size || "",
+            website: data.website || "",
+            linkedin: data.linkedin || "",
+            twitter: data.twitter || "",
+            image_url: data.image_url || "",
+          });
+        }
+      } catch {
+        if (active) setDialog({ open: true, title: 'Error', message: "Error loading profile", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: "Error loading profile", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, [authEmail, role]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -106,7 +109,7 @@ export default function ProfilePage() {
         const err = await response.json();
         setDialog({ open: true, title: 'Error', message: err.detail || "Save failed", type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error saving profile", type: 'error' });
     } finally {
       setSaving(false);
@@ -147,7 +150,7 @@ export default function ProfilePage() {
         const data = await response.json();
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Upload failed"), type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error uploading image", type: 'error' });
     } finally {
       setUploading(false);
@@ -213,6 +216,10 @@ export default function ProfilePage() {
             <div className="flex items-center gap-4">
               {profile.image_url ? (
                 <div className="flex items-center gap-2">
+                  {/* A plain <img> on purpose: the photo is served by the API on
+                      another domain, and next/image would need that domain
+                      hard-coded in next.config for every deployment. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={`${API_BASE}${profile.image_url}`}
                     alt="Profile"

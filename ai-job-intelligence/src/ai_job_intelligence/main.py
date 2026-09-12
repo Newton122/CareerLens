@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from ai_job_intelligence.clock import utcnow
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ import logging
 import time
 
 from fastapi import (
+    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -19,21 +21,24 @@ from fastapi import (
     UploadFile,
 )
 from fastapi import status
-from sqlalchemy import and_, inspect, or_, text
+from sqlalchemy import and_, func, or_
 
 from ai_job_intelligence.config import (
     CORS_ORIGINS,
+    FRONTEND_URL,
     IMAGES_DIR,
     IS_PRODUCTION,
     UPLOAD_DIR,
 )
 from ai_job_intelligence.schemas import (
     CandidateProfile,
+    JobRequirements,
     CVAnalysisRequest, CVAnalysisResponse,
     JobCreate, JobRead, JobUpdate,
     ApplicationCreate, ApplicationRead,
     SavedJobCreate, SavedJobRead,
     RegisterRequest, LoginRequest, AuthResponse,
+    ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
     UserStats, CareerInsights, CVAnalysisDetail,
     ProfileRead, ProfileUpdate,
     InterviewCreate, InterviewRead, InterviewStatusUpdate,
@@ -45,14 +50,26 @@ from ai_job_intelligence.services.pdf_parser import (
     extract_text_from_file,
 )
 from ai_job_intelligence.services.matcher import analyze_match
-from ai_job_intelligence.services.database import SessionLocal, engine, Base
-from ai_job_intelligence.services.ai_service import (analyze_job_description, analyze_cv_text, ocr_image)
+from ai_job_intelligence import migrate
+from ai_job_intelligence.services.database import SessionLocal
+from ai_job_intelligence.services.ai_service import (
+    _FRAMEWORK_MAP,
+    analyze_cv_text,
+    analyze_job_description,
+)
 from ai_job_intelligence.services.cv_profile import (
     get_candidate_profile,
     get_profiles_for_cvs,
     store_profile,
 )
-from ai_job_intelligence.services import assistant, learning_resources, semantic_index
+from ai_job_intelligence.services import (
+    account_tokens,
+    assistant,
+    email_service,
+    embedding_service,
+    learning_resources,
+    semantic_index,
+)
 from ai_job_intelligence.services.guidance import build_guidance
 from ai_job_intelligence.models.cv import CV
 from ai_job_intelligence.models.analysis import Analysis
@@ -63,6 +80,11 @@ from ai_job_intelligence.models.application import Application
 from ai_job_intelligence.models.saved_job import SavedJob
 from ai_job_intelligence.models.interview import Interview
 from ai_job_intelligence.models.message import Message
+from ai_job_intelligence.models.auth_token import (
+    PURPOSE_PASSWORD_RESET,
+    PURPOSE_VERIFY_EMAIL,
+    AuthToken,
+)
 from ai_job_intelligence.services.auth import (create_access_token,
                                                hash_password,
                                                verify_password,
@@ -77,7 +99,25 @@ from ai_job_intelligence.services.auth_dependency import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Job Intelligence API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Work that must finish before the first request is served.
+
+    FastAPI's replacement for the deprecated ``@app.on_event("startup")``.
+    Everything before ``yield`` runs at startup; anything after it would run
+    at shutdown. The functions are defined further down this module, which is
+    fine: they are looked up when the server starts, not when this is defined.
+    """
+    # Bring the schema up to date (Alembic migrations; see migrate.py).
+    migrate.upgrade_database()
+    seed_jobs_if_empty()
+    # Load the embedding model now, so the first CV upload isn't the request
+    # that pays for it.
+    embedding_service.warm_up()
+    yield
+
+
+app = FastAPI(title="AI Job Intelligence API", version="0.1.0", lifespan=lifespan)
 
 # Allow the frontend (Next.js dev server) to call the API during development.
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,116 +129,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def _add_missing_columns(table: str, columns: list[tuple[str, str]]) -> None:
-    """Add any of ``columns`` that ``table`` does not already have.
-
-    Two things this has to get right on PostgreSQL:
-
-    * The live schema is inspected and a plain ADD COLUMN is issued only for
-      what is missing, so each startup reports exactly what it changed.
-    * A failed statement aborts the whole transaction, so every later statement
-      on that connection fails as well. Each column therefore gets its own
-      transaction: a permission error on one table cannot cascade into a failed
-      startup.
-    """
-    with engine.connect() as conn:
-        inspector = inspect(conn)
-        if table not in inspector.get_table_names():
-            return
-        existing = {c["name"] for c in inspector.get_columns(table)}
-
-    for name, col_type in columns:
-        if name in existing:
-            continue
-        try:
-            with engine.begin() as conn:
-                conn.execute(
-                    text(f'ALTER TABLE {table} ADD COLUMN "{name}" {col_type}')
-                )
-            logger.info("Added column %s.%s", table, name)
-        except Exception as exc:
-            logger.error("Could not add column %s.%s: %s", table, name, exc)
-
-
-@app.on_event("startup")
-def startup_event() -> None:
-    Base.metadata.create_all(bind=engine)
-
-    _add_missing_columns(
-        "user_profiles",
-        [
-            ("description", "TEXT"),
-            ("industry", "VARCHAR"),
-            ("company_size", "VARCHAR"),
-            ("website", "VARCHAR"),
-            ("linkedin", "VARCHAR"),
-            ("twitter", "VARCHAR"),
-            ("image_url", "VARCHAR"),
-        ],
-    )
-    # Cache of the parsed CandidateProfile -- see services/cv_profile.py.
-    # embedding/embedding_version -- see services/vector_store.py.
-    _add_missing_columns(
-        "cvs",
-        [
-            ("profile_json", "TEXT"),
-            ("profile_version", "INTEGER"),
-            ("profile_parsed_at", "TIMESTAMP"),
-            ("embedding", "TEXT"),
-            ("embedding_version", "INTEGER"),
-        ],
-    )
-    _add_missing_columns(
-        "jobs",
-        [
-            ("embedding", "TEXT"),
-            ("embedding_version", "INTEGER"),
-        ],
-    )
-    # How a candidate actually attends. Added after the table shipped with
-    # only a free-text location, which left video calls with nowhere to put a
-    # link. Defaults are set inline so existing rows read as a video call of
-    # the standard length rather than as nulls the UI has to special-case.
-    _add_missing_columns(
-        "interviews",
-        [
-            ("mode", "VARCHAR(20) DEFAULT 'video' NOT NULL"),
-            ("meeting_url", "TEXT"),
-            ("dial_in", "VARCHAR(64)"),
-            ("contact_email", "VARCHAR(255)"),
-            ("contact_phone", "VARCHAR(64)"),
-            ("duration_minutes", "INTEGER DEFAULT 45 NOT NULL"),
-            ("timezone", "VARCHAR(64)"),
-        ],
-    )
-
-    # experience_match/education_match became nullable: null now means "the
-    # posting did not state this", which is different from a score of zero.
-    for column in ("experience_match", "education_match"):
-        try:
-            with engine.begin() as conn:
-                conn.execute(
-                    text(f"ALTER TABLE analyses ALTER COLUMN {column} DROP NOT NULL")
-                )
-        except Exception as exc:
-            # Already nullable, or the table was just built by create_all from
-            # the current model; either way there is nothing to relax.
-            logger.debug("Could not relax analyses.%s: %s", column, exc)
-
-    # Note: name/role/company live on user_profiles, not users. Earlier code
-    # also tried to add them to the users table; nothing reads them there, and
-    # the app's DB role does not own that table, so the attempt only produced
-    # errors. Dropped deliberately.
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("UPDATE user_profiles SET role = 'job_seeker' WHERE role IS NULL")
-            )
-    except Exception as exc:
-        logger.error("Could not backfill null user_profiles.role: %s", exc)
-
 
 
 # --- Upload handling -------------------------------------------------------
@@ -244,6 +174,13 @@ _login_account_limiter = SlidingWindowLimiter(Rule(limit=5, window_seconds=900))
 _register_limiter = SlidingWindowLimiter(
     Rule(limit=_REGISTER_IP_LIMIT, window_seconds=3600)
 )
+# "Forgot password" sends email, so it is limited per network and per address:
+# otherwise it could be used to flood someone's inbox.
+_forgot_ip_limiter = SlidingWindowLimiter(
+    Rule(limit=10 if IS_PRODUCTION else 200, window_seconds=3600)
+)
+_forgot_account_limiter = SlidingWindowLimiter(Rule(limit=3, window_seconds=3600))
+_resend_verification_limiter = SlidingWindowLimiter(Rule(limit=3, window_seconds=3600))
 
 
 def _client_ip(request: Request) -> str:
@@ -491,7 +428,11 @@ async def demo_analyze(
     "/api/auth/register",
     response_model=AuthResponse,
 )
-def register(payload: RegisterRequest, request: Request) -> AuthResponse:
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> AuthResponse:
     ip = _client_ip(request)
     _enforce(
         _register_limiter,
@@ -536,7 +477,11 @@ def register(payload: RegisterRequest, request: Request) -> AuthResponse:
             role=payload.role,
         )
         db.add(profile)
+        verify_token = account_tokens.issue(
+            db, user.id, PURPOSE_VERIFY_EMAIL, account_tokens.VERIFY_TOKEN_TTL
+        )
         db.commit()
+        background_tasks.add_task(_send_verification_email, user.email, verify_token)
 
         token = create_access_token(user.id)
 
@@ -600,7 +545,10 @@ def login(payload: LoginRequest, request: Request) -> AuthResponse:
         # who mistypes a few times is not locked out after getting it right.
         _login_account_limiter.reset(account_key)
 
-        token = create_access_token(user.id)
+        profile = _get_user_profile(db, user.id)
+        token = create_access_token(
+            user.id, (profile.token_version or 0) if profile else 0
+        )
 
         role = _get_user_role(db, user.id)
 
@@ -612,6 +560,168 @@ def login(payload: LoginRequest, request: Request) -> AuthResponse:
             role=role,
         )
 
+    finally:
+        db.close()
+
+
+# ─── Password reset and email verification ──────────────────────────
+#
+# Links carry a one-time token (services/account_tokens.py); only its hash is
+# stored. Emails are sent in a background task after the response, so a
+# request never waits on the mail server.
+
+_FORGOT_PASSWORD_REPLY = {
+    "message": (
+        "If an account exists for that email, we've sent a link to reset the "
+        "password. It expires in 60 minutes."
+    )
+}
+
+
+def _send_verification_email(email: str, raw_token: str) -> None:
+    email_service.send_verification(
+        email,
+        f"{FRONTEND_URL}/verify-email?token={raw_token}",
+        hours_valid=int(account_tokens.VERIFY_TOKEN_TTL.total_seconds() // 3600),
+    )
+
+
+def _send_reset_email(email: str, raw_token: str) -> None:
+    email_service.send_password_reset(
+        email,
+        f"{FRONTEND_URL}/reset-password?token={raw_token}",
+        minutes_valid=int(account_tokens.RESET_TOKEN_TTL.total_seconds() // 60),
+    )
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    """Email a password-reset link.
+
+    Always answers the same way, whether or not the address has an account:
+    a different reply (or a slower one) would tell anyone which email
+    addresses are registered.
+    """
+    _enforce(
+        _forgot_ip_limiter,
+        _client_ip(request),
+        "Too many reset requests from this network. Please try again later.",
+    )
+    _forgot_ip_limiter.record(_client_ip(request))
+    if _forgot_account_limiter.check(payload.email) is not None:
+        # Over the per-address limit: same reply, but no further email.
+        return _FORGOT_PASSWORD_REPLY
+    _forgot_account_limiter.record(payload.email)
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == payload.email).first()
+        if user is not None:
+            raw = account_tokens.issue(
+                db, user.id, PURPOSE_PASSWORD_RESET, account_tokens.RESET_TOKEN_TTL
+            )
+            db.commit()
+            background_tasks.add_task(_send_reset_email, user.email, raw)
+        return _FORGOT_PASSWORD_REPLY
+    finally:
+        db.close()
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest) -> dict:
+    """Set a new password using the link from the reset email.
+
+    Also signs the account out everywhere (token_version goes up), and counts
+    as proof the person controls the email address.
+    """
+    db = SessionLocal()
+    try:
+        token = account_tokens.find_valid(db, payload.token, PURPOSE_PASSWORD_RESET)
+        if token is None:
+            raise HTTPException(
+                status_code=400,
+                detail="This reset link is invalid or has expired. Request a new one.",
+            )
+        user = db.get(User, token.user_id)
+        if user is None:
+            raise HTTPException(status_code=400, detail="This reset link is no longer valid.")
+
+        # Check the new password *before* using up the token, so a rejected
+        # password doesn't cost the user their link.
+        try:
+            validate_password(payload.password, email=user.email)
+        except PasswordPolicyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        user.password_hash = hash_password(payload.password)
+        account_tokens.mark_used(token)
+        account_tokens.revoke(db, user.id, PURPOSE_PASSWORD_RESET)
+
+        profile = _get_user_profile(db, user.id)
+        if profile is None:
+            profile = UserProfile(user_id=user.id, role="job_seeker")
+            db.add(profile)
+        profile.token_version = (profile.token_version or 0) + 1
+        if profile.email_verified_at is None:
+            profile.email_verified_at = utcnow()
+        db.commit()
+
+        # Someone locked out by failed attempts can sign in straight away.
+        _login_account_limiter.reset(user.email)
+        return {"message": "Your password has been changed. Please sign in."}
+    finally:
+        db.close()
+
+
+@app.post("/api/auth/verify-email")
+def verify_email(payload: VerifyEmailRequest) -> dict:
+    """Confirm an email address using the link from the verification email."""
+    db = SessionLocal()
+    try:
+        token = account_tokens.find_valid(db, payload.token, PURPOSE_VERIFY_EMAIL)
+        if token is None:
+            raise HTTPException(
+                status_code=400,
+                detail="This verification link is invalid or has expired.",
+            )
+        account_tokens.mark_used(token)
+        profile = _get_user_profile(db, token.user_id)
+        if profile is not None and profile.email_verified_at is None:
+            profile.email_verified_at = utcnow()
+        db.commit()
+        return {"message": "Your email address is confirmed."}
+    finally:
+        db.close()
+
+
+@app.post("/api/auth/resend-verification")
+def resend_verification(
+    background_tasks: BackgroundTasks,
+    current_user_id: int = Depends(get_current_user_id),
+) -> dict:
+    """Send a fresh verification link to the signed-in user."""
+    db = SessionLocal()
+    try:
+        user = db.get(User, current_user_id)
+        profile = _get_user_profile(db, current_user_id)
+        if profile is not None and profile.email_verified_at is not None:
+            return {"message": "Your email address is already confirmed."}
+        _enforce(
+            _resend_verification_limiter,
+            str(current_user_id),
+            "Too many verification emails requested. Please try again later.",
+        )
+        _resend_verification_limiter.record(str(current_user_id))
+        raw = account_tokens.issue(
+            db, current_user_id, PURPOSE_VERIFY_EMAIL, account_tokens.VERIFY_TOKEN_TTL
+        )
+        db.commit()
+        background_tasks.add_task(_send_verification_email, user.email, raw)
+        return {"message": f"We've sent a new confirmation link to {user.email}."}
     finally:
         db.close()
 
@@ -636,6 +746,7 @@ def get_profile(current_user_id: int = Depends(get_current_user_id)) -> ProfileR
             linkedin=(profile.linkedin or "") if profile else "",
             twitter=(profile.twitter or "") if profile else "",
             image_url=(profile.image_url or "") if profile else "",
+            email_verified=bool(profile and profile.email_verified_at),
         )
     finally:
         db.close()
@@ -665,6 +776,7 @@ def update_profile(
             profile.name = payload.name
         if payload.company is not None:
             profile.company = payload.company
+            _sync_company_name(db, current_user_id, profile.company)
         if payload.description is not None:
             profile.description = payload.description
         if payload.industry is not None:
@@ -696,6 +808,7 @@ def update_profile(
             linkedin=profile.linkedin or "",
             twitter=profile.twitter or "",
             image_url=profile.image_url or "",
+            email_verified=profile.email_verified_at is not None,
         )
     finally:
         db.close()
@@ -775,19 +888,8 @@ def get_cv_analysis(
         # No cap. This mirrored the one in the extractor and had the same
         # effect: a CV listing more than twelve skills lost the rest with no
         # indication. The list is already ordered strongest-evidence-first.
-        all_skills = profile.technical_skills + profile.soft_skills
-
-        skills_list = [
-            {
-                "name": skill,
-                "proficiency": "advanced" if i < len(all_skills) // 3 else (
-                    "intermediate" if i < len(all_skills) * 2 // 3 else "beginner"
-                ),
-            }
-            for i, skill in enumerate(all_skills)
-        ]
-
-        strengths = all_skills[:5]
+        skills_list = _skills_with_evidence(profile)
+        strengths = [s["name"] for s in skills_list[:5]]
 
         weaknesses = []
         if len(profile.experience) < 2:
@@ -1141,21 +1243,9 @@ async def upload_cv(
         semantic_index.set_cv_embedding(cv, candidate)
         db.commit()
 
-        all_skills = candidate.technical_skills + candidate.soft_skills
-        if len(all_skills) > 12:
-            all_skills = all_skills[:12]
-
-        skills_list = [
-            {
-                "name": skill,
-                "proficiency": "advanced" if i < len(all_skills) // 3 else (
-                    "intermediate" if i < len(all_skills) * 2 // 3 else "beginner"
-                ),
-            }
-            for i, skill in enumerate(all_skills)
-        ]
-
-        strengths = all_skills[:5]
+        # A preview: the full list is on the CV report page.
+        skills_list = _skills_with_evidence(candidate)[:12]
+        strengths = [s["name"] for s in skills_list[:5]]
 
         weaknesses = []
         if len(candidate.experience) < 2:
@@ -1223,11 +1313,8 @@ def download_cv(
     db = SessionLocal()
     try:
         cv = db.get(CV, cv_id)
-        if cv is None:
-            raise HTTPException(status_code=404, detail="CV not found")
-
-        role = _get_user_role(db, current_user_id)
-        if role != "admin" and cv.user_id != current_user_id:
+        if cv is None or not _may_open_cv(db, cv, current_user_id):
+            # 404 rather than 403 so CV ids cannot be probed.
             raise HTTPException(status_code=404, detail="CV not found")
 
         file_path = Path(cv.file_path)
@@ -1251,6 +1338,15 @@ def download_cv(
         db.close()
 
 
+_IMAGE_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+
 @app.post("/api/upload-image")
 async def upload_image(
     file: UploadFile = File(...),
@@ -1260,23 +1356,22 @@ async def upload_image(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
 
-    allowed_types = {"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"}
-    if file.content_type not in allowed_types:
+    if file.content_type not in _IMAGE_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail="Only PNG, JPG, JPEG, GIF, WEBP images are allowed",
         )
 
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-
-    unique_name = f"{current_user_id}_{uuid4().hex}_{file.filename}"
-    file_path = IMAGES_DIR / unique_name
-
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 5MB)")
 
-    file_path.write_bytes(content)
+    # The stored name is random, with the extension taken from the checked
+    # content type. It used to embed the uploader's own filename, which put
+    # client-chosen text into a server path and into a public URL.
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    unique_name = f"{uuid4().hex}{_IMAGE_EXTENSIONS[file.content_type]}"
+    (IMAGES_DIR / unique_name).write_bytes(content)
 
     image_url = f"/api/images/{unique_name}"
 
@@ -1289,10 +1384,15 @@ async def upload_image(
                 role="job_seeker",
             )
             db.add(profile)
+        previous = profile.image_url or ""
         profile.image_url = image_url
         db.commit()
     finally:
         db.close()
+
+    # The old picture is no longer referenced by anything.
+    if previous.startswith("/api/images/"):
+        _remove_files([IMAGES_DIR / previous.rsplit("/", 1)[-1]])
 
     return {"image_url": image_url, "filename": file.filename}
 
@@ -1302,8 +1402,10 @@ def get_image(image_name: str):
     """Serve an uploaded image file."""
     from fastapi.responses import FileResponse
 
-    file_path = IMAGES_DIR / image_name
-    if file_path.exists():
+    file_path = (IMAGES_DIR / image_name).resolve()
+    # Only a real file directly inside the images folder: ".." or any other
+    # name that resolves elsewhere is simply "not found".
+    if file_path.parent == IMAGES_DIR.resolve() and file_path.is_file():
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="Image not found")
 
@@ -1356,12 +1458,117 @@ def _get_user_email(db, user_id: int) -> str | None:
     return user.email if user else None
 
 
+# How strongly the CV backs a skill, by where the parser found it. This
+# replaces a "proficiency" label (advanced / intermediate / beginner) that was
+# assigned purely by position in the list -- the top third of skills were
+# called "advanced" -- which the parser never measured and no CV can tell us.
+_EVIDENCE_LEVEL = {
+    "experience": "demonstrated",
+    "projects": "demonstrated",
+    "certifications": "demonstrated",
+    "summary": "mentioned",
+    "other": "mentioned",
+    "declared": "listed",
+}
+
+
+def _skills_with_evidence(profile: CandidateProfile) -> list[dict]:
+    """Each skill with how strongly the CV evidences it, strongest first.
+
+    ``demonstrated``: used in a described role, project or certification.
+    ``mentioned``: named in the summary or elsewhere in the text.
+    ``listed``: appears only in a skills list.
+    """
+    found_in = {e.skill.lower(): e.source for e in (profile.skill_evidence or [])}
+    skills = [
+        {
+            "name": name,
+            "evidence": _EVIDENCE_LEVEL.get(found_in.get(name.lower(), ""), "mentioned"),
+        }
+        for name in profile.technical_skills
+    ]
+    skills += [{"name": name, "evidence": "mentioned"} for name in profile.soft_skills]
+    order = {"demonstrated": 0, "mentioned": 1, "listed": 2}
+    # sorted() is stable, so within a level the parser's ranking is kept.
+    return sorted(skills, key=lambda s: order[s["evidence"]])
+
+
+def _may_open_cv(db, cv: CV, user_id: int) -> bool:
+    """Whether ``user_id`` may download the original file of ``cv``.
+
+    The owner and admins always may. Employers may open a job seeker's CV:
+    candidate search and the candidate page already show employers every job
+    seeker's parsed CV, and the "View CV" button there is how they read the
+    original. A CV uploaded by anyone else (another employer, an admin) is not
+    part of that pool, so it stays private.
+    """
+    if cv.user_id == user_id:
+        return True
+    role = _get_user_role(db, user_id)
+    if role == ADMIN_ROLE:
+        return True
+    return role == "employer" and _get_user_role(db, cv.user_id) == "job_seeker"
+
+
 def _get_latest_cv(db, user_id: int) -> CV | None:
     return (
         db.query(CV)
         .filter(CV.user_id == user_id)
         .order_by(CV.created_at.desc())
         .first()
+    )
+
+
+def _application_counts(db, job_ids: list[int]) -> dict[int, int]:
+    """{job_id: number of applications} for many jobs in one query."""
+    if not job_ids:
+        return {}
+    rows = (
+        db.query(Application.job_id, func.count(Application.id))
+        .filter(Application.job_id.in_(job_ids))
+        .group_by(Application.job_id)
+        .all()
+    )
+    return {job_id: count for job_id, count in rows}
+
+
+def _sync_company_name(db, employer_id: int, name: str | None) -> None:
+    """Keep the company shown on an employer's postings in step with their profile.
+
+    A posting stores the company name it was created with, so renaming the
+    company used to leave every earlier posting under the old name.
+    """
+    if name:
+        db.query(Job).filter(Job.employer_id == employer_id).update(
+            {Job.company: name}, synchronize_session=False
+        )
+
+
+def _job_requirements(job: Job, *, use_llm: bool = True) -> JobRequirements:
+    """What a stored posting asks for, for scoring a candidate against it.
+
+    Read from the description text (by Gemini or the rules, see
+    analyze_job_description) and then topped up with the skills the employer
+    typed into the posting's "required skills" field. Only the description
+    used to be read, so a skill the employer listed but did not repeat in the
+    prose never counted towards anyone's match.
+    """
+    requirements = analyze_job_description(job.description, use_llm=use_llm)
+    have = {s.lower() for s in requirements.technical_skills}
+    extra: list[str] = []
+    for raw in _parse_json_list(job.required_skills):
+        name = raw.strip()
+        if not name or name.lower() in have:
+            continue
+        have.add(name.lower())
+        # Employers type "python"; show it the way the rest of the app does.
+        extra.append(_FRAMEWORK_MAP.get(name.lower(), name))
+    if not extra:
+        return requirements
+    # A copy, never an in-place edit: analyze_job_description caches its
+    # results, and mutating one would leak this job's skills into others.
+    return requirements.model_copy(
+        update={"technical_skills": list(requirements.technical_skills) + extra}
     )
 
 
@@ -1452,11 +1659,13 @@ def get_jobs(
                 get_candidate_profile(db, cv) if cv else None
             )
 
+        # One grouped query for every job's application count, rather than a
+        # separate COUNT per job (the "N+1 queries" pattern).
+        counts = _application_counts(db, [job.id for job in jobs])
+
         result: list[dict] = []
         for job in jobs:
-            app_count = db.query(Application).filter(
-                Application.job_id == job.id
-            ).count()
+            app_count = counts.get(job.id, 0)
 
             match_score: float | None = None
             skill_gaps: list[str] | None = None
@@ -1464,7 +1673,7 @@ def get_jobs(
 
             if not is_employer and not is_admin and candidate_profile is not None:
                 # Bulk listing: deterministic extraction only (see analyze_job_description).
-                requirements = analyze_job_description(job.description, use_llm=False)
+                requirements = _job_requirements(job, use_llm=False)
                 m = analyze_match(
                     candidate=candidate_profile, requirements=requirements
                 )
@@ -1623,7 +1832,7 @@ def get_job(
             cv = _get_latest_cv(db, current_user_id)
             if cv:
                 candidate_profile = get_candidate_profile(db, cv)
-                requirements = analyze_job_description(job.description)
+                requirements = _job_requirements(job)
                 m = analyze_match(
                     candidate=candidate_profile, requirements=requirements
                 )
@@ -1762,7 +1971,7 @@ def apply_to_job(
         cv = _get_latest_cv(db, current_user_id)
         if cv:
             candidate_profile = get_candidate_profile(db, cv)
-            requirements = analyze_job_description(job.description)
+            requirements = _job_requirements(job)
             m = analyze_match(
                 candidate=candidate_profile, requirements=requirements
             )
@@ -1968,7 +2177,7 @@ def get_job_recommendations(
         scored_jobs: list[dict] = []
         for job, _semantic_score in retrieved:
             # Deterministic extraction only -- no LLM call per job.
-            requirements = analyze_job_description(job.description, use_llm=False)
+            requirements = _job_requirements(job, use_llm=False)
             m = analyze_match(
                 candidate=candidate_profile, requirements=requirements
             )
@@ -2301,17 +2510,120 @@ def get_career_insights(
 
 
 
+# ─── Deleting data ───────────────────────────────────────────────────
+#
+# PostgreSQL refuses to delete a row that another row still points at, so a
+# delete has to remove (or detach) the dependants first. Deleting a CV or a
+# user straight away failed with a 500 as soon as anything referred to it.
+#
+# Rule of thumb used below: rows that exist only because of the thing being
+# deleted go with it (a CV's analyses, a posting's applications); rows that
+# record something between two people outlive it and just lose the link (an
+# interview booked from a CV keeps existing without the CV).
+
+
+def _delete_cvs(db, cv_ids: list[int]) -> list[Path]:
+    """Delete CVs and their analyses (caller commits).
+
+    Returns the stored files, to be removed only once the commit succeeds --
+    removing them first would leave rows pointing at missing files if the
+    transaction then failed.
+    """
+    if not cv_ids:
+        return []
+    files = [Path(p) for (p,) in db.query(CV.file_path).filter(CV.id.in_(cv_ids))]
+    db.query(Analysis).filter(Analysis.cv_id.in_(cv_ids)).delete(
+        synchronize_session=False
+    )
+    db.query(Interview).filter(Interview.cv_id.in_(cv_ids)).update(
+        {Interview.cv_id: None}, synchronize_session=False
+    )
+    db.query(CV).filter(CV.id.in_(cv_ids)).delete(synchronize_session=False)
+    return files
+
+
+def _delete_user_and_data(db, user_id: int) -> list[Path]:
+    """Delete a user and everything that belongs to them (caller commits).
+
+    Returns the uploaded files to remove after the commit.
+    """
+    cv_ids = [cv_id for (cv_id,) in db.query(CV.id).filter(CV.user_id == user_id)]
+    files = _delete_cvs(db, cv_ids)
+
+    # Their job postings, and what exists only because of a posting.
+    job_ids = [j for (j,) in db.query(Job.id).filter(Job.employer_id == user_id)]
+    if job_ids:
+        db.query(Application).filter(Application.job_id.in_(job_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(SavedJob).filter(SavedJob.job_id.in_(job_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Interview).filter(Interview.job_id.in_(job_ids)).update(
+            {Interview.job_id: None}, synchronize_session=False
+        )
+        db.query(Message).filter(Message.job_id.in_(job_ids)).update(
+            {Message.job_id: None}, synchronize_session=False
+        )
+        db.query(Job).filter(Job.id.in_(job_ids)).delete(synchronize_session=False)
+
+    # Their own activity. An interview or a thread with a deleted person is
+    # meaningless to the other side, so those go too.
+    db.query(Application).filter(Application.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(SavedJob).filter(SavedJob.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(Interview).filter(
+        or_(Interview.employer_id == user_id, Interview.candidate_user_id == user_id)
+    ).delete(synchronize_session=False)
+    db.query(Message).filter(
+        or_(Message.sender_id == user_id, Message.recipient_id == user_id)
+    ).delete(synchronize_session=False)
+
+    db.query(AuthToken).filter(AuthToken.user_id == user_id).delete(
+        synchronize_session=False
+    )
+
+    profile = _get_user_profile(db, user_id)
+    if profile is not None and (profile.image_url or "").startswith("/api/images/"):
+        files.append(IMAGES_DIR / profile.image_url.rsplit("/", 1)[-1])
+    db.query(UserProfile).filter(UserProfile.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(User).filter(User.id == user_id).delete(synchronize_session=False)
+    return files
+
+
+def _remove_files(paths: list[Path]) -> None:
+    """Best-effort removal of uploaded files after their rows are gone.
+
+    Only files inside the upload folders are touched, so a stray path stored
+    by an older version of the app can never delete something elsewhere.
+    """
+    roots = {UPLOAD_DIR.resolve(), IMAGES_DIR.resolve()}
+    for path in paths:
+        try:
+            resolved = path.resolve()
+            if any(resolved.is_relative_to(root) for root in roots):
+                resolved.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("Could not remove uploaded file %s: %s", path.name, exc)
+
+
 @app.post("/api/reset-data")
 def reset_user_data(
     current_user_id: int = Depends(get_current_user_id),
 ) -> dict:
     db = SessionLocal()
     try:
-        cvs = db.query(CV).filter(CV.user_id == current_user_id).all()
-        for cv in cvs:
-            db.query(Analysis).filter(Analysis.cv_id == cv.id).delete()
-            db.delete(cv)
+        cv_ids = [
+            cv_id for (cv_id,) in db.query(CV.id).filter(CV.user_id == current_user_id)
+        ]
+        files = _delete_cvs(db, cv_ids)
         db.commit()
+        _remove_files(files)
         return {"message": "All data reset successfully"}
     finally:
         db.close()
@@ -2446,7 +2758,8 @@ def get_candidates(
                     "experience": experience,
                     "education": education,
                     "summary": candidate_profile.technical_skills[:5],
-                    "cv_url": cv.file_path,
+                    # A URL the frontend can fetch, never the server file path.
+                    "cv_url": f"/api/cvs/{cv.id}/download",
                     "semantic_score": (
                         round(semantic_scores[cv.id], 4)
                         if cv.id in semantic_scores
@@ -2525,7 +2838,8 @@ def get_candidate_detail(
             "match_score": match_score,
             "experience": experience_entries,
             "education": education_entries,
-            "cv_url": cv.file_path,
+            # A URL the frontend can fetch, never the server file path.
+            "cv_url": f"/api/cvs/{cv.id}/download",
         }
     finally:
         db.close()
@@ -2949,7 +3263,7 @@ def get_thread(
             .all()
         )
 
-        now = datetime.utcnow()
+        now = utcnow()
         touched = False
         for m in messages:
             if m.recipient_id == current_user_id and m.read_at is None:
@@ -3039,6 +3353,7 @@ def upsert_company_profile(
             db.add(profile)
 
         profile.company = payload.get("name") or profile.company
+        _sync_company_name(db, current_user_id, profile.company)
         profile.description = payload.get("description", profile.description)
         profile.industry = payload.get("industry", profile.industry)
         profile.company_size = payload.get(
@@ -3094,9 +3409,7 @@ def get_saved_jobs(
 
             match_score: float | None = None
             if candidate_profile is not None:
-                requirements = analyze_job_description(
-                    job.description, use_llm=False
-                )
+                requirements = _job_requirements(job, use_llm=False)
                 m = analyze_match(
                     candidate=candidate_profile, requirements=requirements
                 )
@@ -3338,9 +3651,12 @@ def delete_user(
                 detail="Cannot delete your own account",
             )
 
-        db.delete(user)
+        # Read before deleting: the row is gone once the transaction commits.
+        email = user.email
+        files = _delete_user_and_data(db, user_id)
         db.commit()
-        return {"message": f"User {user.email} deleted"}
+        _remove_files(files)
+        return {"message": f"User {email} deleted"}
     finally:
         db.close()
 
@@ -3446,7 +3762,6 @@ DIVERSE_JOBS = [
     },
 ]
 
-@app.on_event("startup")
 def seed_jobs_if_empty():
     """Seed diverse jobs across sectors if the jobs table is empty.
 

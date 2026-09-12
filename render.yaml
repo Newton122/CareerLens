@@ -7,25 +7,54 @@ services:
   - type: web
     name: careerlens-api
     runtime: python
+    # A persistent disk needs a paid instance. Starter (512 MB) is enough:
+    # the API uses about 330 MB since embeddings moved to ONNX Runtime.
+    plan: starter
     rootDir: ai-job-intelligence
-    buildCommand: pip install -r requirements.txt
+    # Install, then download the embedding model into the build, so the
+    # server never downloads it at start-up.
+    buildCommand: pip install -r requirements.txt && PYTHONPATH=src python -m ai_job_intelligence.services.embedding_service
     # The package lives under src/ (src layout), so point uvicorn there.
+    # Database migrations run automatically when the app starts.
     startCommand: uvicorn ai_job_intelligence.main:app --app-dir src --host 0.0.0.0 --port $PORT
     healthCheckPath: /
+    # Uploaded CVs and profile photos. Without a disk they would be wiped on
+    # every deploy. (A service with a disk runs as a single instance.)
+    disk:
+      name: careerlens-uploads
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.3
       - key: APP_ENV
         value: production
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: IMAGES_DIR
+        value: /var/data/uploads/images
       # Refuses to start without a strong key in production; Render generates
       # a random 256-bit value here.
       - key: SECRET_KEY
         generateValue: true
-      # postgresql://... connection string. SQLite is rejected in production.
+      # postgresql://... connection string. SQLite is rejected.
       - key: DATABASE_URL
         sync: false
       # The Vercel origin(s), comma-separated, e.g. https://careerlens.vercel.app
+      # The first one is also used for links in emails (or set FRONTEND_URL).
       - key: CORS_ORIGINS
+        sync: false
+      # Email for password reset and verification (any SMTP provider).
+      # Leave SMTP_HOST empty to disable sending.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
         sync: false
       # Optional: enables the Gemini-backed features.
       - key: GOOGLE_API_KEY

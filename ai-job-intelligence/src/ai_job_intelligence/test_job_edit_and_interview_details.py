@@ -7,14 +7,15 @@ a hostile meeting link never reaches the database.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
+from ai_job_intelligence.clock import utcnow
 from ai_job_intelligence.conftest import TEST_PASSWORD
 
-SOON = (datetime.utcnow() + timedelta(days=10)).isoformat()
-LATER = (datetime.utcnow() + timedelta(days=20)).isoformat()
+SOON = (utcnow() + timedelta(days=10)).isoformat()
+LATER = (utcnow() + timedelta(days=20)).isoformat()
 
 
 @pytest.fixture

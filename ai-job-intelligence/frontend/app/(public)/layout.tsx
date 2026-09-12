@@ -13,7 +13,13 @@ import Footer from "@/components/Footer";
  * Navbar/Footer the landing page uses, which previously left About, FAQ,
  * How-it-works, Contact, Pricing and Demo with no navigation at all.
  */
-const CHROMELESS_ROUTES = ["/login", "/register"];
+const CHROMELESS_ROUTES = [
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();

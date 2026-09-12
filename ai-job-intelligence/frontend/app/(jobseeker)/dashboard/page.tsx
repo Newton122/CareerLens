@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { motion } from "framer-motion";
 import { FaUpload, FaSearch, FaChartLine, FaBookmark, FaUser, FaArrowRight } from "react-icons/fa";
+import type { IconType } from "react-icons";
 import MessageDialog from "@/components/MessageDialog";
 
 interface UserStats {
@@ -34,30 +35,33 @@ export default function JobSeekerDashboard() {
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
+  // State is set only in the promise callbacks, and never after the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchData();
+    let active = true;
+    (async () => {
+      try {
+        const statsRes = await apiCall("/api/user/stats");
+        if (statsRes.ok) {
+          const data = await statsRes.json();
+          if (active) setStats(data);
+        }
+
+        const jobsRes = await apiCall("/api/jobs");
+        if (jobsRes.ok) {
+          const jobsData: Job[] = await jobsRes.json();
+          if (active) setJobs(jobsData.slice(0, 4));
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading dashboard", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const statsRes = await apiCall("/api/user/stats");
-      if (statsRes.ok) {
-        const data = await statsRes.json();
-        setStats(data);
-      }
-
-      const jobsRes = await apiCall("/api/jobs");
-      if (jobsRes.ok) {
-        const jobsData: Job[] = await jobsRes.json();
-        setJobs(jobsData.slice(0, 4));
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading dashboard", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-neutral-900">
@@ -193,7 +197,7 @@ export default function JobSeekerDashboard() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: any; color: string }) {
+function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: IconType; color: string }) {
   const colorClasses: Record<string, string> = {
     blue: "from-blue-500/20 to-blue-500/5 border-blue-500/20 text-blue-400",
     emerald: "from-emerald-500/20 to-emerald-500/5 border-emerald-500/20 text-emerald-400",
@@ -209,7 +213,7 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
   );
 }
 
-function QuickAction({ icon: Icon, label, onClick, color }: { icon: any; label: string; onClick: () => void; color: string }) {
+function QuickAction({ icon: Icon, label, onClick, color }: { icon: IconType; label: string; onClick: () => void; color: string }) {
   const colorClasses: Record<string, string> = {
     blue: "text-blue-400 bg-blue-600/10 border-blue-500/20 hover:bg-blue-600/20",
     emerald: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import MessageDialog from "@/components/MessageDialog";
@@ -46,7 +46,7 @@ export default function EmployerCandidatesPage() {
           setDialog({ open: true, title: 'Info', message: "No candidates found", type: 'info' });
         }
       }
-    } catch (err) {
+    } catch {
       setDialog({ open: true, title: 'Error', message: "Error searching candidates", type: 'error' });
     } finally {
       setLoading(false);
@@ -77,7 +77,8 @@ export default function EmployerCandidatesPage() {
               placeholder="Skills (comma-separated), e.g. React, TypeScript"
               className="input-premium"
             />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" title="How complete the candidate's CV is: skills, experience, education. Not a match against one of your jobs.">
+              <span className="text-sm text-neutral-400 whitespace-nowrap">Min. profile score</span>
               <input
                 type="range"
                 min="0"
@@ -124,8 +125,9 @@ export default function EmployerCandidatesPage() {
                     <p className="text-base text-neutral-500">{candidate.email}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-base font-bold text-blue-600">
+                    <p className="text-base font-bold text-blue-600" title="How complete the candidate's CV is: skills, experience, education. Not a match against one of your jobs.">
                       {candidate.match_score}%
+                      <span className="block text-xs font-normal text-neutral-500">profile score</span>
                     </p>
                     <span className={`text-base px-1.5 py-0.5 rounded border ${getExpLevelColor(candidate.experience_level)}`}>
                       {candidate.experience_level}

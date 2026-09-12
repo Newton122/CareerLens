@@ -141,9 +141,18 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">
-                Password
-              </label>
+              <div className="flex items-baseline justify-between mb-2">
+                <label className="block text-sm font-medium text-neutral-300">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => router.push("/forgot-password")}
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}

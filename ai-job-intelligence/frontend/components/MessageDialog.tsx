@@ -1,6 +1,5 @@
 "use client";
 
-import { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type DialogType = "info" | "success" | "error" | "warning";

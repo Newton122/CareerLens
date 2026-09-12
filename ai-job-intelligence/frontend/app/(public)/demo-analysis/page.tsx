@@ -1,13 +1,12 @@
 "use client";
 
-import { NOT_SPECIFIED, describeApiError, formatScore } from "@/components/format";
+import { describeApiError, formatScore } from "@/components/format";
 
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaCheck,
   FaArrowRight,
-  FaChartLine,
   FaBrain,
   FaStar,
   FaRocket,
@@ -17,7 +16,6 @@ import {
   FaPlay,
   FaFileAlt,
   FaRobot,
-  FaLightbulb,
 } from "react-icons/fa";
 import MessageDialog from "@/components/MessageDialog";
 import { API_BASE } from "@/components/api";
@@ -149,32 +147,6 @@ export default function DemoAnalysisPage() {
     if (score >= 50) return "text-amber-400";
     if (score >= 30) return "text-orange-400";
     return "text-rose-400";
-  };
-
-  const getProficiencyColor = (level: string) => {
-    switch (level) {
-      case "expert":
-        return "bg-emerald-500";
-      case "advanced":
-        return "bg-blue-500";
-      case "intermediate":
-        return "bg-amber-500";
-      default:
-        return "bg-rose-500";
-    }
-  };
-
-  const getProficiencyWidth = (level: string) => {
-    switch (level) {
-      case "expert":
-        return "100%";
-      case "advanced":
-        return "75%";
-      case "intermediate":
-        return "50%";
-      default:
-        return "25%";
-    }
   };
 
   return (

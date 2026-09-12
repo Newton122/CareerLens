@@ -15,7 +15,7 @@ from ai_job_intelligence.services import skill_evidence
 # a different CandidateProfile for the same CV text. Profiles cached on CV rows
 # record the version that produced them and are rebuilt when it no longer
 # matches, so a logic change cannot leave stale profiles behind.
-PROFILE_VERSION = 3
+PROFILE_VERSION = 4
 
 _TECH_VOCAB = [
     "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust",
@@ -346,70 +346,60 @@ def _extract_experience(text: str) -> list[str]:
     return experience[:20]
 
 
-def _extract_education(text: str) -> list[str]:
-    education = []
-    lines = text.split("\n")
-    in_education_section = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        if line_lower.startswith("education") and len(line_lower) < 20:
-            in_education_section = True
+def _section_lines(text: str, section: str, *, min_len: int, limit: int) -> list[str]:
+    """Cleaned, de-duplicated lines under one CV section.
+
+    Uses the same heading detection as experience (cv_sections), so
+    "Academic Background", "Licenses & Certifications" or "Selected Projects"
+    are found too. The previous per-section scanners only recognised a line
+    that *started* with the exact word, and silently returned nothing for
+    every other heading.
+    """
+    lines: list[str] = []
+    for line in split_sections(text).get(section, []):
+        cleaned = line.strip().lstrip("-•*–— ").strip()
+        if len(cleaned) < min_len or cleaned.endswith(":") or cleaned in lines:
             continue
-        if in_education_section:
-            if any(line_lower.startswith(x) for x in ["experience", "certifications", "projects", "skills"]):
-                break
-            cleaned = line.strip()
-            if not cleaned or len(cleaned) < 5:
-                continue
-            if cleaned.startswith("- ") or cleaned.startswith("• "):
-                cleaned = cleaned[2:].strip()
-            if cleaned and cleaned not in education and not cleaned.endswith(":"):
-                education.append(cleaned)
-    return education[:5]
+        lines.append(cleaned)
+    return lines[:limit]
+
+
+def _lines_mentioning(text: str, pattern: str, *, limit: int) -> list[str]:
+    """Real lines of the CV that match ``pattern``.
+
+    The fallback when a CV has no heading for a section. It used to insert
+    text the CV never contained -- "Bachelor's degree in Computer Science or
+    related field" for anyone who wrote the word "degree" -- which then
+    counted as the candidate's education. Quoting the CV's own line is
+    honest, and still gives the matcher something to compare.
+    """
+    found: list[str] = []
+    for line in text.split("\n"):
+        cleaned = line.strip().lstrip("-•*–— ").strip()
+        if 5 <= len(cleaned) <= 200 and re.search(pattern, cleaned, re.IGNORECASE):
+            if cleaned not in found:
+                found.append(cleaned)
+    return found[:limit]
+
+
+_DEGREE_WORDS = (
+    r"\b(bachelor|master|ph\.?d|doctorate|b\.?sc|m\.?sc|b\.?a\b|m\.?a\b|"
+    r"b\.?eng|m\.?eng|mba|diploma|degree|university|college)"
+)
+_CERT_WORDS = r"\b(certified|certification|certificate)\b"
+_YEARS_WORDS = r"\b\d+\+?\s*(years?|yrs?)\b"
+
+
+def _extract_education(text: str) -> list[str]:
+    return _section_lines(text, "education", min_len=5, limit=5)
 
 
 def _extract_certifications(text: str) -> list[str]:
-    certs = []
-    lines = text.split("\n")
-    in_cert_section = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        if line_lower.startswith("certifications") or line_lower.startswith("certification"):
-            in_cert_section = True
-            continue
-        if in_cert_section:
-            if any(line_lower.startswith(x) for x in ["experience", "education", "projects", "skills"]):
-                break
-            cleaned = line.strip()
-            if not cleaned or len(cleaned) < 5:
-                continue
-            if cleaned.startswith("- ") or cleaned.startswith("• "):
-                cleaned = cleaned[2:].strip()
-            if cleaned and cleaned not in certs:
-                certs.append(cleaned)
-    return certs[:5]
+    return _section_lines(text, "certifications", min_len=5, limit=5)
 
 
 def _extract_projects(text: str) -> list[str]:
-    projects = []
-    lines = text.split("\n")
-    in_project_section = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        if line_lower.startswith("projects") or line_lower.startswith("project"):
-            in_project_section = True
-            continue
-        if in_project_section:
-            if any(line_lower.startswith(x) for x in ["experience", "education", "certifications", "skills"]):
-                break
-            cleaned = line.strip()
-            if not cleaned or len(cleaned) < 10:
-                continue
-            if cleaned.startswith("- ") or cleaned.startswith("• "):
-                cleaned = cleaned[2:].strip()
-            if cleaned and cleaned not in projects:
-                projects.append(cleaned)
-    return projects[:10]
+    return _section_lines(text, "projects", min_len=10, limit=10)
 
 
 def _local_analyze_job_description(job_description: str) -> JobRequirements:
@@ -445,10 +435,15 @@ def _local_analyze_job_description(job_description: str) -> JobRequirements:
 
 
 def _gemini_analyze_job_description(job_description: str) -> JobRequirements | None:
+    from ai_job_intelligence.config import GOOGLE_API_KEY
+
+    # No key, no call. Creating a client without one fails half-way and the
+    # library then logs an AttributeError while cleaning up after itself.
+    if not GOOGLE_API_KEY:
+        return None
     try:
         from google import genai  # type: ignore
         from google.genai import types  # type: ignore
-        from ai_job_intelligence.config import GOOGLE_API_KEY
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -571,12 +566,15 @@ def analyze_cv_text(cv_text: str) -> CandidateProfile:
 
     req = _local_analyze_job_description(cv_text)
 
+    # A CV without a heading for a section still gets something to match on,
+    # but only its own words: the lines that mention a degree, a
+    # certification, or a number of years.
     if not education:
-        education = req.education_requirements_list[:3] if req.education_requirements_list else []
+        education = _lines_mentioning(cv_text, _DEGREE_WORDS, limit=3)
     if not experience:
-        experience = req.experience_requirements[:3] if req.experience_requirements else []
+        experience = _lines_mentioning(cv_text, _YEARS_WORDS, limit=3)
     if not certifications:
-        certifications = req.certifications[:3] if req.certifications else []
+        certifications = _lines_mentioning(cv_text, _CERT_WORDS, limit=3)
 
     return CandidateProfile(
         technical_skills=technical,
@@ -592,11 +590,14 @@ def analyze_cv_text(cv_text: str) -> CandidateProfile:
 
 def ocr_image(file_path: str) -> str:
     """Extract text from an image using Gemini Vision API."""
+    from ai_job_intelligence.config import GOOGLE_API_KEY
+
+    if not GOOGLE_API_KEY:
+        return ""
     try:
         from pathlib import Path
         from google import genai  # type: ignore
         from google.genai import types  # type: ignore
-        from ai_job_intelligence.config import GOOGLE_API_KEY
 
         path = Path(file_path)
         with open(path, "rb") as f:

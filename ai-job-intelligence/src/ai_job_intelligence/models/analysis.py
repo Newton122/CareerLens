@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from ai_job_intelligence.clock import utcnow
 from ai_job_intelligence.database import Base
 
 
@@ -68,6 +69,6 @@ class Analysis(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
+        default=utcnow,
         nullable=False,
     )

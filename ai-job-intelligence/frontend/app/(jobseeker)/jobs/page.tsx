@@ -31,26 +31,29 @@ export default function JobsPage() {
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
   const isAdmin = role === "admin";
 
+  // State is set only after the request returns, and never once the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
   useEffect(() => {
-    fetchJobs();
-  }, []);
-
-  const fetchJobs = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall("/api/jobs");
-      if (response.ok) {
-        const data = await response.json();
-        setJobs(data);
-      } else {
-        setDialog({ open: true, title: 'Error', message: "Failed to load jobs", type: 'error' });
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiCall("/api/jobs");
+        if (response.ok) {
+          const data = await response.json();
+          if (active) setJobs(data);
+        } else {
+          if (active) setDialog({ open: true, title: 'Error', message: "Failed to load jobs", type: 'error' });
+        }
+      } catch (err) {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching jobs", type: 'error' });
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error fetching jobs", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = jobs.filter((j) => {
     const matchesSearch =

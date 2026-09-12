@@ -1,11 +1,16 @@
 "use client";
 
-import { describeApiError } from "@/components/format";
+import {
+  describeApiError,
+  EVIDENCE_HELP,
+  EVIDENCE_LABEL,
+  evidenceWidth,
+  type EvidenceLevel,
+} from "@/components/format";
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { apiCall, viewFile } from "@/components/api";
-import LoadingSpinner from "@/components/LoadingSpinner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FaCheck,
@@ -13,7 +18,6 @@ import {
   FaChevronRight,
   FaArrowRight,
   FaEye,
-  FaDownload,
   FaLightbulb,
   FaRobot,
   FaFileAlt,
@@ -24,7 +28,7 @@ import LearningResources from "@/components/LearningResources";
 
 interface Skill {
   name: string;
-  proficiency: "beginner" | "intermediate" | "advanced" | "expert";
+  evidence: EvidenceLevel;
 }
 
 interface SkillEvidenceItem {
@@ -62,10 +66,6 @@ export default function CVAnalysisDetailPage() {
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
-  useEffect(() => {
-    fetchAnalysis();
-  }, [cvId]);
-
   const handleViewCV = async () => {
     try {
       await viewFile(`/api/cvs/${cvId}/download`);
@@ -74,26 +74,31 @@ export default function CVAnalysisDetailPage() {
     }
   };
 
+  // State is set only in the promise callbacks, and never after the page
+  // has moved on (`active`), so a slow response can't overwrite newer data.
+  // (This page used to have the same effect twice, fetching everything twice.)
   useEffect(() => {
-    fetchAnalysis();
-  }, [cvId]);
-
-  const fetchAnalysis = async () => {
-    setLoading(true);
-    try {
-      const response = await apiCall(`/api/cvs/${cvId}/analysis`);
-      if (response.ok) {
-        setAnalysis(await response.json());
-      } else {
+    let active = true;
+    apiCall(`/api/cvs/${cvId}/analysis`)
+      .then(async (response) => {
         const data = await response.json();
-        setDialog({ open: true, title: 'Error', message: describeApiError(data, "Analysis not found"), type: 'error' });
-      }
-    } catch (err) {
-      setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading analysis", type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (!active) return;
+        if (response.ok) {
+          setAnalysis(data);
+        } else {
+          setDialog({ open: true, title: 'Error', message: describeApiError(data, "Analysis not found"), type: 'error' });
+        }
+      })
+      .catch((err) => {
+        if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading analysis", type: 'error' });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cvId]);
 
   const getScoreColor = (score: number) => {
     if (score >= 75) return "text-emerald-600";
@@ -102,29 +107,14 @@ export default function CVAnalysisDetailPage() {
     return "text-red-600";
   };
 
-  const getProficiencyColor = (level: string) => {
+  const getEvidenceColor = (level: EvidenceLevel) => {
     switch (level) {
-      case "expert":
+      case "demonstrated":
         return "bg-emerald-500";
-      case "advanced":
+      case "mentioned":
         return "bg-blue-500";
-      case "intermediate":
-        return "bg-amber-500";
       default:
-        return "bg-rose-500";
-    }
-  };
-
-  const getProficiencyWidth = (level: string) => {
-    switch (level) {
-      case "expert":
-        return "100%";
-      case "advanced":
-        return "75%";
-      case "intermediate":
-        return "50%";
-      default:
-        return "25%";
+        return "bg-neutral-500";
     }
   };
 
@@ -305,6 +295,7 @@ export default function CVAnalysisDetailPage() {
             <FaRobot className="w-5 h-5 text-blue-400" />
             AI-Extracted Skills
           </h3>
+          <p className="text-xs text-neutral-500 mb-4 -mt-2">{EVIDENCE_HELP}</p>
           <div className="space-y-3">
             {analysis.skills.map((skill, i) => (
               <motion.div
@@ -315,12 +306,12 @@ export default function CVAnalysisDetailPage() {
               >
                 <div className="flex justify-between text-sm mb-1">
                   <span className="text-neutral-300">{skill.name}</span>
-                  <span className="text-neutral-400 capitalize">{skill.proficiency}</span>
+                  <span className="text-neutral-400">{EVIDENCE_LABEL[skill.evidence]}</span>
                 </div>
                 <div className="w-full bg-neutral-700/50 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full ${getProficiencyColor(skill.proficiency)} transition-all duration-500`}
-                    style={{ width: getProficiencyWidth(skill.proficiency) }}
+                    className={`h-2 rounded-full ${getEvidenceColor(skill.evidence)} transition-all duration-500`}
+                    style={{ width: evidenceWidth(skill.evidence) }}
                   />
                 </div>
               </motion.div>
