@@ -244,7 +244,17 @@ export default function EmployerCandidateDetailPage() {
             </button>
             {candidate.id && (
               <button
-                onClick={() => viewFile(`/api/cvs/${candidate.id}/download`)}
+                onClick={() =>
+                  // Without this catch a failure did nothing visible at all.
+                  viewFile(`/api/cvs/${candidate.id}/download`).catch((err) =>
+                    setDialog({
+                      open: true,
+                      title: "Couldn't open this CV",
+                      message: err instanceof Error ? err.message : "Failed to open CV",
+                      type: "error",
+                    }),
+                  )
+                }
                 className="btn-secondary"
               >
                 View CV

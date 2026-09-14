@@ -67,13 +67,43 @@ export async function apiCall(
   return response;
 }
 
+/**
+ * Open a protected file (a CV) in a new tab.
+ *
+ * A plain link can't send the Authorization header, so the file is downloaded
+ * with the token and shown from a temporary blob: URL.
+ *
+ * The tab is opened *first*, while the click is still happening, and filled in
+ * once the download finishes. Browsers only let a page open a tab as a direct
+ * result of a click; opening it after waiting for a slow download can be
+ * silently blocked as a pop-up.
+ *
+ * On failure it throws an Error carrying the server's own reason (for example
+ * "The original file for this CV is no longer stored on the server…"), so the
+ * page can show it instead of a vague "failed".
+ */
 export async function viewFile(endpoint: string): Promise<void> {
-  const response = await apiCall(endpoint);
-  if (!response.ok) {
-    throw new Error("Failed to load file");
+  const tab = window.open("", "_blank");
+  try {
+    const response = await apiCall(endpoint);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const detail = (data as { detail?: unknown }).detail;
+      throw new Error(
+        typeof detail === "string" && detail.trim()
+          ? detail
+          : `Could not open the file (error ${response.status}).`,
+      );
+    }
+    const url = window.URL.createObjectURL(await response.blob());
+    if (tab) {
+      tab.location.href = url;
+    } else {
+      window.open(url, "_blank"); // the browser refused the early tab; try now
+    }
+    setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    tab?.close(); // don't leave an empty tab behind
+    throw err;
   }
-  const blob = await response.blob();
-  const url = window.URL.createObjectURL(blob);
-  window.open(url, "_blank");
-  setTimeout(() => window.URL.revokeObjectURL(url), 60000);
 }

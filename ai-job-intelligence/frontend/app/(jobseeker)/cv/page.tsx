@@ -29,8 +29,9 @@ export default function CVPage() {
   const handleViewCV = async (cvId: number) => {
     try {
       await viewFile(`/api/cvs/${cvId}/download`);
-    } catch {
-      setDialog({ open: true, title: 'Error', message: "Failed to open CV", type: 'error' });
+    } catch (err) {
+      // Show the server's reason (e.g. the file is no longer stored).
+      setDialog({ open: true, title: "Couldn't open this CV", message: err instanceof Error ? err.message : "Failed to open CV", type: 'error' });
     }
   };
 

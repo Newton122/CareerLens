@@ -1365,7 +1365,20 @@ def download_cv(
                 media_type=media_type,
                 filename=cv.filename,
             )
-        raise HTTPException(status_code=404, detail="File not found on disk")
+        # The row survived but the file did not. On a host whose disk is wiped
+        # on every deploy (no persistent disk mounted at UPLOAD_DIR), this is
+        # what every CV uploaded before the last deploy looks like -- so say
+        # so in the log, where it can be spotted.
+        logger.warning(
+            "CV %s: original file is missing (%s). Is UPLOAD_DIR on a persistent disk?",
+            cv.id,
+            file_path.name,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail="The original file for this CV is no longer stored on the "
+            "server. Upload the CV again to view it.",
+        )
     finally:
         db.close()
 
