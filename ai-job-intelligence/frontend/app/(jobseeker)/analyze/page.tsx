@@ -25,6 +25,8 @@ import {
   FaBolt,
 } from "react-icons/fa";
 import MessageDialog from "@/components/MessageDialog";
+import { UpgradeDialog } from "@/components/UpgradePrompt";
+import { PAYMENT_REQUIRED, PLAN_CHANGED_EVENT } from "@/components/billing";
 
 interface AnalysisData {
   id: number;
@@ -78,6 +80,7 @@ export default function AnalyzePage() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [showJobs, setShowJobs] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
+  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
 
   // State is set only after the request returns, and never once the page
   // has moved on (`active`). With no CV in the URL there is nothing to load,
@@ -165,7 +168,11 @@ export default function AnalyzePage() {
       });
       const data = await response.json();
       if (response.ok && data.analysis_id) {
+        window.dispatchEvent(new Event(PLAN_CHANGED_EVENT));  // one fewer left
         router.push(`/results/${data.analysis_id}`);
+      } else if (response.status === PAYMENT_REQUIRED) {
+        // The monthly Free allowance is used up (enforced by the server).
+        setUpgradeMessage(describeApiError(data, "Your plan's analysis limit is reached."));
       } else {
         setDialog({ open: true, title: 'Error', message: describeApiError(data, "Analysis failed"), type: 'error' });
       }
@@ -567,6 +574,7 @@ export default function AnalyzePage() {
           )}
         </AnimatePresence>
 
+        <UpgradeDialog message={upgradeMessage} onClose={() => setUpgradeMessage(null)} />
         <MessageDialog
           open={dialog.open}
           onClose={() => setDialog({ ...dialog, open: false })}

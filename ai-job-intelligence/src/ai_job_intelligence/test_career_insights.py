@@ -45,13 +45,15 @@ Diploma in Culinary Arts
 """
 
 
-def _insights_for(client, email, blob):
+def _insights_for(client, grant_plan, email, blob):
     r = client.post(
         "/api/auth/register",
         json={"email": email, "password": TEST_PASSWORD, "name": email, "role": "job_seeker"},
     )
     assert r.status_code == 200, r.text
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    # Career Insights is a Pro feature (its gating is tested in test_billing).
+    grant_plan(headers)
 
     up = client.post(
         "/api/upload-cv",
@@ -66,18 +68,18 @@ def _insights_for(client, email, blob):
 
 
 @pytest.fixture(scope="module")
-def sre_insights(client):
-    return _insights_for(client, "ci-sre@test.com", SRE_CV)
+def sre_insights(client, grant_plan):
+    return _insights_for(client, grant_plan, "ci-sre@test.com", SRE_CV)
 
 
 @pytest.fixture(scope="module")
-def marketer_insights(client):
-    return _insights_for(client, "ci-marketer@test.com", MARKETER_CV)
+def marketer_insights(client, grant_plan):
+    return _insights_for(client, grant_plan, "ci-marketer@test.com", MARKETER_CV)
 
 
 @pytest.fixture(scope="module")
-def chef_insights(client):
-    return _insights_for(client, "ci-chef@test.com", CHEF_CV)
+def chef_insights(client, grant_plan):
+    return _insights_for(client, grant_plan, "ci-chef@test.com", CHEF_CV)
 
 
 def test_different_fields_get_different_gaps(sre_insights, marketer_insights):
@@ -140,7 +142,7 @@ def test_profile_strength_reflects_cv_completeness(sre_insights, chef_insights):
     assert sre_insights["profile_strength"] > chef_insights["profile_strength"]
 
 
-def test_no_cv_returns_an_empty_but_honest_payload(client):
+def test_no_cv_returns_an_empty_but_honest_payload(client, grant_plan):
     r = client.post(
         "/api/auth/register",
         json={
@@ -151,6 +153,7 @@ def test_no_cv_returns_an_empty_but_honest_payload(client):
         },
     )
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    grant_plan(headers)
     body = client.get("/api/career-insights", headers=headers).json()
 
     assert body["profile_strength"] == 0

@@ -13,6 +13,16 @@ import {
   FaShieldAlt,
 } from "react-icons/fa";
 import MessageDialog from "@/components/MessageDialog";
+import UpgradePrompt from "@/components/UpgradePrompt";
+import {
+  PAYMENT_REQUIRED,
+  PLAN_CHANGED_EVENT,
+  formatTime,
+  useSubscription,
+} from "@/components/billing";
+
+// Thrown when the API answers 402: the page shows an upgrade card instead.
+class UpgradeRequired extends Error {}
 
 interface CareerInsight {
   profile_strength: number;
@@ -34,11 +44,17 @@ export default function CareerInsightsPage() {
   const [insights, setInsights] = useState<CareerInsight | null>(null);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
+  const [needsUpgrade, setNeedsUpgrade] = useState(false);
+  const subscription = useSubscription();
+  const sessions = subscription?.usage.insight_sessions_this_month;
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
   // Fetches and returns the insights; callers decide what to do with them.
   const loadInsights = useCallback(async (): Promise<CareerInsight> => {
     const response = await apiCall("/api/career-insights");
+    // Career Insights is a Pro feature. The server decides, not this page:
+    // a Free account gets 402 however the UI is modified.
+    if (response.status === PAYMENT_REQUIRED) throw new UpgradeRequired();
     if (!response.ok) throw new Error("Failed to load insights");
     return response.json();
   }, []);
@@ -49,9 +65,16 @@ export default function CareerInsightsPage() {
     let active = true;
     loadInsights()
       .then((data) => {
-        if (active) setInsights(data);
+        if (!active) return;
+        setInsights(data);
+        // Loading may have started a new session; refresh the counters.
+        window.dispatchEvent(new Event(PLAN_CHANGED_EVENT));
       })
       .catch((err) => {
+        if (active && err instanceof UpgradeRequired) {
+          setNeedsUpgrade(true);
+          return;
+        }
         if (active) setDialog({ open: true, title: 'Error', message: err instanceof Error ? err.message : "Error loading insights", type: 'error' });
       })
       .finally(() => {
@@ -68,7 +91,8 @@ export default function CareerInsightsPage() {
       const response = await apiCall("/api/reset-data", { method: "POST" });
       if (response.ok) {
         setDialog({ open: true, title: 'Success', message: "All data has been reset", type: 'success' });
-        setInsights(await loadInsights());
+        window.dispatchEvent(new Event(PLAN_CHANGED_EVENT));  // usage changed
+        if (!needsUpgrade) setInsights(await loadInsights());
       } else {
         setDialog({ open: true, title: 'Error', message: "Failed to reset data", type: 'error' });
       }
@@ -86,6 +110,50 @@ export default function CareerInsightsPage() {
           <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
           <p className="text-neutral-400">Loading career insights...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (needsUpgrade) {
+    return (
+      <div className="min-h-screen text-neutral-50">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="page-header">
+            <div>
+              <h1 className="page-title">Career Insights</h1>
+              <p className="page-subtitle">
+                Where you stand in your field, measured against real postings
+              </p>
+            </div>
+            {/* Kept on Free: it is how a Free user replaces their one CV. */}
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              className="btn-secondary flex items-center gap-2 text-rose-400 border-rose-500/30 hover:bg-rose-500/10 disabled:opacity-50"
+            >
+              <FaTrash className="w-4 h-4" />
+              {resetting ? "Resetting..." : "Reset All Data"}
+            </button>
+          </div>
+          <UpgradePrompt
+            badge="Monthly limit reached"
+            title="You've used this month's Career Insights sessions"
+            message="The Free plan includes 2 sessions a month, each open for 24 hours. Pro gives you unlimited insights, computed from live job postings in your field."
+            perks={[
+              "Your profile strength and market position",
+              "The skill gaps that matter for roles in your field",
+              "Recommended roles and salary ranges from real postings",
+              "A prioritised list of next steps",
+            ]}
+          />
+        </div>
+        <MessageDialog
+          open={dialog.open}
+          onClose={() => setDialog({ ...dialog, open: false })}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+        />
       </div>
     );
   }
@@ -132,6 +200,19 @@ export default function CareerInsightsPage() {
             {resetting ? "Resetting..." : "Reset All Data"}
           </motion.button>
         </motion.div>
+
+        {sessions && sessions.limit !== null && sessions.session_expires_at && (
+          <p className="meta mb-6 -mt-4">
+            Free plan · Career Insights session {sessions.used} of {sessions.limit} this
+            month · open until {formatTime(sessions.session_expires_at)}.{" "}
+            <button
+              onClick={() => router.push("/pricing")}
+              className="text-indigo-300 hover:text-indigo-200"
+            >
+              Unlimited with Pro →
+            </button>
+          </p>
+        )}
 
         {/* Overview Stats */}
         <motion.div

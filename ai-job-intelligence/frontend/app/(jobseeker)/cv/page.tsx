@@ -8,6 +8,8 @@ import { API_BASE, apiCall, viewFile } from "@/components/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { FaEye, FaChartLine } from "react-icons/fa";
 import MessageDialog from "@/components/MessageDialog";
+import { UpgradeDialog } from "@/components/UpgradePrompt";
+import { PAYMENT_REQUIRED, PLAN_CHANGED_EVENT } from "@/components/billing";
 
 interface CV {
   id: number;
@@ -22,6 +24,7 @@ export default function CVPage() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
+  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
 
   const handleViewCV = async (cvId: number) => {
     try {
@@ -79,12 +82,19 @@ export default function CVPage() {
         },
       );
 
+      if (response.status === PAYMENT_REQUIRED) {
+        // The Free plan's CV limit (enforced by the server, before storing).
+        const data = await response.json();
+        setUpgradeMessage(describeApiError(data, "Your plan's CV limit is reached."));
+        return;
+      }
       if (!response.ok) {
         const data = await response.json();
         throw new Error(describeApiError(data, "Upload failed"));
       }
 
        const result = await response.json();
+       window.dispatchEvent(new Event(PLAN_CHANGED_EVENT));  // CV count changed
        setDialog({ open: true, title: 'Success', message: "CV uploaded successfully", type: 'success' });
        setCVs(await loadCVs());
        router.push(`/analyze?cv_id=${result.cv_id}`);
@@ -196,6 +206,7 @@ export default function CVPage() {
           </p>
         )}
       </div>
+      <UpgradeDialog message={upgradeMessage} onClose={() => setUpgradeMessage(null)} />
       <MessageDialog
         open={dialog.open}
         onClose={() => setDialog({ ...dialog, open: false })}

@@ -174,3 +174,57 @@ def _resolve_secret_key() -> str:
 
 # Never log or expose this value.
 SECRET_KEY = _resolve_secret_key()
+
+
+# --- Stripe (subscriptions) ------------------------------------------------
+#
+# Four values, all from the environment, none ever in source control:
+#
+#   STRIPE_SECRET_KEY            sk_test_...  lets this server call Stripe's API
+#   STRIPE_WEBHOOK_SECRET        whsec_...    proves a webhook really came from Stripe
+#   STRIPE_PRICE_PRO_MONTHLY     price_...    the Pro monthly Price in your Stripe account
+#   STRIPE_PRICE_PRO_YEARLY      price_...    the Pro yearly Price
+#
+# With any of them missing the app still runs; billing endpoints answer 503
+# and every user is simply on the Free plan.
+
+
+def _resolve_stripe_secret_key() -> str:
+    """Return the Stripe API key, refusing anything that can move real money.
+
+    This project is test-mode only. Stripe keys say which mode they belong to
+    in their prefix: ``sk_test_`` / ``rk_test_`` are sandbox keys that can only
+    ever create fake charges; ``sk_live_`` / ``rk_live_`` charge real cards.
+    Refusing live keys at startup makes "accidentally charged someone" a
+    configuration error that crashes loudly, not a surprise on a statement.
+    """
+    key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+    if not key:
+        return ""
+    if key.startswith(("sk_live_", "rk_live_")):
+        raise RuntimeError(
+            "STRIPE_SECRET_KEY is a LIVE key. CareerLens billing runs in Stripe "
+            "test mode only. Use the sk_test_... key from the Stripe dashboard "
+            "(Developers > API keys, with 'Test mode' switched on)."
+        )
+    if not key.startswith(("sk_test_", "rk_test_")):
+        raise RuntimeError(
+            "STRIPE_SECRET_KEY does not look like a Stripe test key "
+            "(expected it to start with sk_test_)."
+        )
+    return key
+
+
+# Never log or expose these two values.
+STRIPE_SECRET_KEY = _resolve_stripe_secret_key()
+STRIPE_WEBHOOK_SECRET = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+
+# Price IDs are not secret (they appear in Checkout URLs), but they are
+# configuration: they differ between your test account and anyone else's.
+STRIPE_PRICE_PRO_MONTHLY = (os.getenv("STRIPE_PRICE_PRO_MONTHLY") or "").strip()
+STRIPE_PRICE_PRO_YEARLY = (os.getenv("STRIPE_PRICE_PRO_YEARLY") or "").strip()
+
+# True when checkout can actually be offered.
+BILLING_ENABLED = bool(
+    STRIPE_SECRET_KEY and STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY
+)

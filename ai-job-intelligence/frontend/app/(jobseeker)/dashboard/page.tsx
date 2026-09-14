@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiCall } from "@/components/api";
 import { motion } from "framer-motion";
-import { FaUpload, FaSearch, FaChartLine, FaBookmark, FaUser, FaArrowRight } from "react-icons/fa";
+import { FaUpload, FaSearch, FaChartLine, FaBookmark, FaUser, FaArrowRight, FaCrown } from "react-icons/fa";
 import type { IconType } from "react-icons";
 import MessageDialog from "@/components/MessageDialog";
+import { PLAN_LABEL, formatDate, useSubscription } from "@/components/billing";
 
 interface UserStats {
   cvs_uploaded: number;
@@ -33,6 +34,7 @@ export default function JobSeekerDashboard() {
   });
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const subscription = useSubscription();
   const [dialog, setDialog] = useState({ open: false, title: '', message: '', type: 'info' as 'info' | 'success' | 'error' | 'warning' });
 
   // State is set only in the promise callbacks, and never after the page
@@ -99,6 +101,8 @@ export default function JobSeekerDashboard() {
           <StatCard label="Applications" value={stats.applications} icon={FaSearch} color="emerald" />
           <StatCard label="Saved" value={stats.saved_jobs} icon={FaBookmark} color="amber" />
         </motion.div>
+
+        {subscription && <PlanStrip info={subscription} onUpgrade={() => router.push("/pricing")} onManage={() => router.push("/billing")} />}
 
         <motion.div
           className="rounded-lg bg-neutral-800/50 border border-neutral-700/50 p-5 mb-6"
@@ -230,5 +234,62 @@ function QuickAction({ icon: Icon, label, onClick, color }: { icon: IconType; la
       <Icon className="w-5 h-5" />
       <span className="text-sm font-medium">{label}</span>
     </motion.button>
+  );
+}
+
+function PlanStrip({
+  info,
+  onUpgrade,
+  onManage,
+}: {
+  info: NonNullable<ReturnType<typeof useSubscription>>;
+  onUpgrade: () => void;
+  onManage: () => void;
+}) {
+  const analyses = info.usage.analyses_this_month;
+  const uploads = info.usage.cv_uploads_this_month;
+  const insights = info.usage.insight_sessions_this_month;
+  const isFree = info.plan === "free";
+  return (
+    <div
+      className={`rounded-lg border p-4 mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 ${
+        isFree ? "border-neutral-700/50 bg-neutral-800/40" : "border-emerald-500/25 bg-emerald-500/5"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <FaCrown className={`w-4 h-4 ${isFree ? "text-neutral-500" : "text-emerald-400"}`} />
+        <span className="item-title">{PLAN_LABEL[info.plan]} plan</span>
+      </div>
+      {isFree ? (
+        <>
+          <span className="meta tabular-nums">
+            {analyses.used}/{analyses.limit} analyses
+          </span>
+          <span className="meta tabular-nums">
+            {uploads.used}/{uploads.limit} CV uploads
+          </span>
+          <span className="meta tabular-nums">
+            {insights.used}/{insights.limit} insight sessions
+          </span>
+          <span className="meta">this month</span>
+          <button onClick={onUpgrade} className="btn-small ml-auto text-indigo-300 hover:text-indigo-200">
+            Upgrade for unlimited →
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="meta">
+            Unlimited CVs and analyses
+            {info.current_period_end &&
+              (info.cancel_at_period_end
+                ? ` · ends ${formatDate(info.current_period_end)}`
+                : ` · renews ${formatDate(info.current_period_end)}`)}
+          </span>
+          <button onClick={onManage} className="btn-small ml-auto text-neutral-400 hover:text-neutral-200">
+            Billing →
+          </button>
+        </>
+      )}
+    </div>
   );
 }

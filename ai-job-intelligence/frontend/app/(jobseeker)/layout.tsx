@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { useUnreadMessageCount } from "@/components/unreadMessages";
 import VerifyEmailBanner from "@/components/VerifyEmailBanner";
+import { useSubscription } from "@/components/billing";
 import { ReactNode, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -20,6 +21,8 @@ import {
   FaRobot,
   FaCalendarAlt,
   FaEnvelope,
+  FaCrown,
+  FaCreditCard,
 } from "react-icons/fa";
 
 const navItems = [
@@ -32,6 +35,7 @@ const navItems = [
   { label: "Messages", path: "/messages", icon: FaEnvelope },
   { label: "CareerLens Chat", path: "/career-lens", icon: FaRobot },
   { label: "My CV", path: "/cv", icon: FaUpload },
+  { label: "Billing", path: "/billing", icon: FaCreditCard },
 ];
 
 export default function JobSeekerLayout({
@@ -49,6 +53,8 @@ export default function JobSeekerLayout({
   const isSidebarOpen = sidebarOpenOn === pathname;
   const setIsSidebarOpen = (open: boolean) => setSidebarOpenOn(open ? pathname : null);
   const unread = useUnreadMessageCount(Boolean(token));
+  // Display only: the server enforces the plan on every request regardless.
+  const subscription = useSubscription(Boolean(token));
 
   useEffect(() => {
     if (!loading && !token) {
@@ -111,7 +117,42 @@ export default function JobSeekerLayout({
         })}
       </nav>
 
-      <div className="mt-8 px-3 space-y-1">
+      {subscription && (
+        <div className="mt-6 mx-3">
+          {subscription.plan === "free" ? (
+            <button
+              onClick={() => router.push("/pricing")}
+              className="w-full text-left rounded-lg border border-neutral-700/60 bg-neutral-800/40 p-3 hover:border-indigo-500/40 transition-colors"
+            >
+              <span className="eyebrow">Free plan</span>
+              <span className="block text-xs text-neutral-400 mt-1.5 tabular-nums">
+                {Math.max(
+                  0,
+                  (subscription.usage.analyses_this_month.limit ?? 0) -
+                    subscription.usage.analyses_this_month.used,
+                )}{" "}
+                of {subscription.usage.analyses_this_month.limit} analyses left this month
+              </span>
+              <span className="flex items-center gap-1.5 text-xs font-medium text-indigo-300 mt-2">
+                <FaCrown className="w-3 h-3" /> Upgrade to Pro
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={() => router.push("/billing")}
+              className="w-full flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5 text-sm text-emerald-300"
+            >
+              <FaCrown className="w-3.5 h-3.5" />
+              <span className="font-medium">CareerLens {subscription.plan === "pro" ? "Pro" : "Enterprise"}</span>
+              {subscription.payment_issue && (
+                <span className="ml-auto text-xs text-rose-300">Payment issue</span>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="mt-6 px-3 space-y-1">
         <button
           onClick={() => router.push("/profile")}
           className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/50 rounded-lg transition-all duration-200"

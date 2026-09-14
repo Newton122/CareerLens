@@ -89,10 +89,14 @@ test.describe.serial("job seeker journey", () => {
     await expect(page.getByRole("heading", { name: "My Applications" })).toBeVisible();
   });
 
-  test("career insights and the CareerLens chat", async ({ page }) => {
+  test("career insights (a Free session) and the CareerLens chat", async ({ page }) => {
     await signIn(page, email, PASSWORD, "/dashboard");
+    // Free plan: opening the page starts the first of two monthly sessions.
+    const insights = waitForApi(page, "GET", "/api/career-insights");
     await page.goto("/career-insights");
+    expect((await insights).status()).toBe(200);
     await expect(page.getByText("How these figures were calculated")).toBeVisible();
+    await expect(page.getByText(/Career Insights session 1 of 2/)).toBeVisible();
 
     await page.goto("/career-lens");
     await page.getByPlaceholder(/Ask about your skills/).fill("What skills should I learn next?");

@@ -59,3 +59,16 @@ services:
       # Optional: enables the Gemini-backed features.
       - key: GOOGLE_API_KEY
         sync: false
+      # Stripe subscriptions, TEST MODE ONLY: the app refuses to start with an
+      # sk_live_ key. Leave all four empty to run without billing (everyone is
+      # on Free). See ai-job-intelligence/BILLING.md.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      # From the webhook endpoint you add in the Stripe dashboard for
+      # https://<this-service>/api/billing/webhook (not the `stripe listen` one).
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_PRO_YEARLY
+        sync: false

@@ -100,6 +100,14 @@ def app_module(tmp_path_factory):
     os.environ["UPLOAD_DIR"] = str(uploads)
     os.environ["IMAGES_DIR"] = str(uploads / "images")
 
+    # Billing configured as it would be in development, with made-up values
+    # (these override any real ones in .env). No request ever reaches Stripe:
+    # see _no_real_stripe_calls below, and the fake in test_billing.py.
+    os.environ["STRIPE_SECRET_KEY"] = "sk_test_careerlens_suite"
+    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_careerlens_suite"
+    os.environ["STRIPE_PRICE_PRO_MONTHLY"] = "price_test_pro_monthly"
+    os.environ["STRIPE_PRICE_PRO_YEARLY"] = "price_test_pro_yearly"
+
     # Re-import so config picks up the test upload directories and the engine
     # binds to the throwaway schema.
     # conftest itself is kept: re-importing it would run the set-up above
@@ -117,7 +125,52 @@ def client(app_module):
 
 
 @pytest.fixture(scope="session")
-def seeker(client):
+def grant_plan(app_module):
+    """Put a test user on a paid plan: ``grant_plan(headers)``.
+
+    In the app, only the Stripe webhook (or the server asking Stripe) writes
+    the subscriptions table. Here the test plays Stripe's part and writes a
+    row directly, so tests about uploads or insights are not also tests of
+    billing. The billing tests in test_billing.py go through the real path.
+    """
+    from datetime import timedelta
+
+    from jose import jwt
+
+    counter = {"n": 0}
+
+    def grant(headers: dict, plan: str = "pro") -> int:
+        token = headers["Authorization"].split(" ", 1)[1]
+        user_id = int(jwt.get_unverified_claims(token)["sub"])
+        counter["n"] += 1
+        now = app_module.utcnow()
+        db = app_module.SessionLocal()
+        try:
+            db.add(
+                app_module.Subscription(
+                    user_id=user_id,
+                    plan=plan,
+                    status="active",
+                    stripe_customer_id=f"cus_test_{user_id}",
+                    stripe_subscription_id=f"sub_granted_{user_id}_{counter['n']}",
+                    stripe_price_id="price_granted_in_tests",
+                    billing_interval="month",
+                    current_period_start=now,
+                    current_period_end=now + timedelta(days=30),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+        return user_id
+
+    return grant
+
+
+@pytest.fixture(scope="session")
+def seeker(client, grant_plan):
+    """A job seeker on Pro, so the many tests that upload several CVs or read
+    Career Insights are not stopped by the Free plan's limits."""
     r = client.post(
         "/api/auth/register",
         json={
@@ -128,7 +181,9 @@ def seeker(client):
         },
     )
     assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    grant_plan(headers)
+    return headers
 
 
 @pytest.fixture(scope="session")
@@ -175,3 +230,17 @@ def _reset_rate_limiters(app_module):
     yield
     for limiter in limiters:
         limiter.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_stripe_calls(app_module, monkeypatch):
+    """Fail loudly if any test would call the real Stripe API.
+
+    test_billing.py replaces this with an in-memory fake; everywhere else a
+    Stripe call is a bug in the test (or the app), never a network request.
+    """
+
+    def refuse():
+        raise AssertionError("A test tried to call the real Stripe API")
+
+    monkeypatch.setattr(app_module.billing, "stripe_client", refuse)

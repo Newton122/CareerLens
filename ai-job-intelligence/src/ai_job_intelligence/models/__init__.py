@@ -8,8 +8,18 @@ from ai_job_intelligence.models.application import Application
 from ai_job_intelligence.models.saved_job import SavedJob
 from ai_job_intelligence.models.interview import Interview
 from ai_job_intelligence.models.message import Message
+from ai_job_intelligence.models.billing import (
+    BillingCustomer,
+    StripeEvent,
+    Subscription,
+)
+from ai_job_intelligence.models.usage_event import UsageEvent
 
 __all__ = [
+    "BillingCustomer",
+    "StripeEvent",
+    "Subscription",
+    "UsageEvent",
     "Analysis",
     "AuthToken",
     "CV",

@@ -72,6 +72,9 @@ export default defineConfig({
         APP_ENV: "development",
         UPLOAD_DIR: "./.e2e-uploads",
         IMAGES_DIR: "./.e2e-uploads/images",
+        // Billing off, whatever .env holds: e2e must never call Stripe.
+        STRIPE_SECRET_KEY: "",
+        STRIPE_WEBHOOK_SECRET: "",
       },
       url: `http://127.0.0.1:${API_PORT}/`,
       reuseExistingServer: false,

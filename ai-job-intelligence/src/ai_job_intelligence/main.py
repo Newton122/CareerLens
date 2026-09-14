@@ -96,6 +96,10 @@ from ai_job_intelligence.services.password_policy import (
 from ai_job_intelligence.services.rate_limit import Rule, SlidingWindowLimiter
 
 from ai_job_intelligence.services.auth_dependency import get_current_user_id
+from ai_job_intelligence.services import billing, entitlements
+from ai_job_intelligence.models.billing import BillingCustomer, Subscription
+from ai_job_intelligence.models.usage_event import UsageEvent
+from ai_job_intelligence import billing_routes
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +133,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Subscriptions and Stripe webhooks: /api/billing/* (see billing_routes.py).
+app.include_router(billing_routes.router)
 
 
 # --- Upload handling -------------------------------------------------------
@@ -297,6 +304,11 @@ def analyze_cv(
                 detail="CV not found",
             )
 
+        # Plan quota (Free: 5 analyses a month). Checked before the analysis
+        # runs so a refused request costs no AI work; checked again below,
+        # under a lock, where it actually counts.
+        entitlements.check_analysis_quota(db, current_user_id)
+
         # Understand the candidate
         candidate = get_candidate_profile(db, cv)
 
@@ -324,6 +336,9 @@ def analyze_cv(
             summary=result["summary"],
         )
 
+        # Records the use in the same transaction as the analysis: both are
+        # saved by the commit below, or neither is.
+        entitlements.reserve_analysis(db, current_user_id)
         db.add(analysis)
         db.commit()
         db.refresh(analysis)
@@ -1211,6 +1226,13 @@ async def upload_cv(
     file: UploadFile = File(...),
     current_user_id: int = Depends(get_current_user_id),
 ) -> dict:
+    # Plan quota (Free: 2 uploads a month), before the file is stored or parsed.
+    db = SessionLocal()
+    try:
+        entitlements.check_cv_quota(db, current_user_id)
+    finally:
+        db.close()
+
     file_path, original_name = await _save_upload(
         file, max_bytes=MAX_CV_UPLOAD_BYTES
     )
@@ -1232,6 +1254,10 @@ async def upload_cv(
             user_id=current_user_id,
         )
 
+        # The authoritative check, under a per-user lock held until the
+        # commit below, so two simultaneous uploads cannot both squeeze in.
+        # Also records the upload, so deleting the CV later won't refund it.
+        entitlements.reserve_cv_upload(db, current_user_id)
         db.add(cv)
         db.commit()
         db.refresh(cv)
@@ -1291,6 +1317,12 @@ async def upload_cv(
             }
         }
 
+    except HTTPException:
+        # A deliberate refusal (the plan's upload limit): pass it through as-is
+        # rather than letting the handler below relabel it a server error.
+        db.rollback()
+        file_path.unlink(missing_ok=True)
+        raise
     except Exception:
         db.rollback()
         raise HTTPException(
@@ -2330,6 +2362,11 @@ def get_career_insights(
                 "sources": ["No CV uploaded yet."],
             }
 
+        # Plan quota (Free: 2 sessions a month, 24 hours each). Placed after
+        # the no-CV answer above, so opening the page without a CV is free.
+        # 402 if a new session is needed and none are left.
+        entitlements.open_insight_session(db, current_user_id)
+
         candidate = get_candidate_profile(db, cv)
         candidate_skills_lower = {
             s.lower() for s in candidate.technical_skills + candidate.soft_skills
@@ -2495,6 +2532,9 @@ def get_career_insights(
                 "tailoring applications to specific roles."
             )
 
+        # Save the session's usage row only now that the insights were
+        # actually computed; an error above rolls it back uncharged.
+        db.commit()
         return {
             "profile_strength": profile_strength,
             "skill_gaps": skill_gaps,
@@ -2585,6 +2625,14 @@ def _delete_user_and_data(db, user_id: int) -> list[Path]:
     db.query(AuthToken).filter(AuthToken.user_id == user_id).delete(
         synchronize_session=False
     )
+
+    # Billing rows. The caller must already have cancelled any live Stripe
+    # subscription (billing.cancel_subscriptions_for_user) -- deleting these
+    # rows alone would not stop Stripe charging the card.
+    for model in (UsageEvent, Subscription, BillingCustomer):
+        db.query(model).filter(model.user_id == user_id).delete(
+            synchronize_session=False
+        )
 
     profile = _get_user_profile(db, user_id)
     if profile is not None and (profile.image_url or "").startswith("/api/images/"):
@@ -3649,6 +3697,19 @@ def delete_user(
             raise HTTPException(
                 status_code=400,
                 detail="Cannot delete your own account",
+            )
+
+        # Stop Stripe billing them first. If Stripe can't be reached the
+        # account stays, rather than disappearing with a subscription that
+        # keeps charging their card.
+        try:
+            billing.cancel_subscriptions_for_user(db, user_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Could not cancel Stripe subscriptions for user %s: %s", user_id, exc)
+            raise HTTPException(
+                status_code=502,
+                detail="Could not cancel this user's subscription with Stripe, "
+                "so the account was not deleted. Try again shortly.",
             )
 
         # Read before deleting: the row is gone once the transaction commits.

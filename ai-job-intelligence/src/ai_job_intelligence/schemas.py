@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List
+from typing import List, Literal
 
 import re
 
@@ -551,3 +551,36 @@ class ConversationRead(BaseModel):
     last_message_at: datetime | None = None
     last_sender_id: int | None = None
     unread_count: int = 0
+
+
+# --- Billing ---------------------------------------------------------------
+
+
+class CheckoutRequest(BaseModel):
+    """What the pricing page may ask for: a plan *name* and a billing interval.
+
+    There is deliberately no price field. The server maps (plan, interval) to
+    a Stripe price through the whitelist in services/plans.py. ``extra =
+    "forbid"`` makes the API reject a request that tries to smuggle one in
+    (``{"plan": "pro", "interval": "month", "price_id": "price_cheap"}`` gets
+    a 422) rather than silently ignoring it -- so a mistake in the frontend
+    shows up immediately instead of looking like it worked.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    plan: Literal["pro"]
+    interval: Literal["month", "year"]
+
+
+class CheckoutConfirmRequest(BaseModel):
+    """The ``session_id`` Stripe put in the success URL (cs_test_...).
+
+    This is only a *hint* about which Checkout Session to look at. The server
+    fetches that session from Stripe itself and checks it belongs to the
+    signed-in user; nothing about the plan is taken from this request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(..., min_length=10, max_length=255, pattern=r"^cs_[A-Za-z0-9_]+$")

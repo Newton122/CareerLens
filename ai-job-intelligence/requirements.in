@@ -31,6 +31,9 @@ onnxruntime==1.30.0
 tokenizers==0.22.2
 huggingface_hub==0.36.2
 
+# Subscriptions: Stripe's official server SDK (see services/billing.py)
+stripe==15.6.1
+
 # Optional Gemini features, and HTTP calls for learning resources
 google-genai==2.17.0
 httpx==0.28.1
