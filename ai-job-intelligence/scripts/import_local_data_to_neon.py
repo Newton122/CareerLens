@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -124,15 +125,49 @@ def main() -> None:
                 for table, count in _counts(target_cursor, target_tables).items()
                 if count
             }
-            if nonempty:
-                raise SystemExit(
-                    f"Neon already contains application data: {nonempty}. "
-                    "Nothing was imported."
-                )
 
     print("Local row counts:", source_counts)
-    if input("Type IMPORT to copy these records into empty Neon: ") != "IMPORT":
+    if nonempty:
+        print("Current Neon rows to be replaced:", nonempty)
+        if input("Type REPLACE TARGET to back up Neon and replace its app data: ") != "REPLACE TARGET":
+            raise SystemExit("Cancelled; Neon was not changed.")
+    elif input("Type IMPORT to copy these records into empty Neon: ") != "IMPORT":
         raise SystemExit("Cancelled; no data was imported.")
+
+    if nonempty:
+        backup_dir = Path.home() / ".careerlens-backups"
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        backup_dir.chmod(0o700)
+        descriptor, backup_name = tempfile.mkstemp(
+            prefix="neon-before-import-",
+            suffix="-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + ".dump",
+            dir=backup_dir,
+        )
+        os.close(descriptor)
+        backup_path = Path(backup_name)
+        backup_path.chmod(0o600)
+        subprocess.run(
+            [
+                "pg_dump",
+                "--format=custom",
+                "--no-owner",
+                "--no-acl",
+                "--file",
+                str(backup_path),
+            ],
+            env=target_environment,
+            check=True,
+        )
+        print(f"Neon backup saved locally: {backup_path}")
+
+        with psycopg.connect(target, connect_timeout=10) as target_connection:
+            with target_connection.cursor() as target_cursor:
+                table_list = ", ".join(
+                    f'public."{table}"' for table in sorted(target_tables)
+                )
+                target_cursor.execute(
+                    f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE"
+                )
 
     with tempfile.NamedTemporaryFile(
         prefix="careerlens-local-", suffix=".dump"
